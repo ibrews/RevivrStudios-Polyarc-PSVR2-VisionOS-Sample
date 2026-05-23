@@ -9,7 +9,7 @@
 			<string>com.Epic.Unreal</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>VisionPro</string>
+				<string>My_Project</string>
 			</array>
 		</dict>
 	</array>
@@ -18,7 +18,7 @@
 	<key>UIFileSharingEnabled</key>
 	<false/>
 	<key>CFBundleDisplayName</key>
-	<string>My_Project</string>
+	<string>MyProject</string>
 	<key>UIRequiresFullScreen</key>
 	<true/>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
@@ -42,6 +42,6 @@
 		<key>TVTopShelfPrimaryImageWide</key>
 		<string>Top Shelf Image Wide</string>
 	</dict>
-	<key>NSHandsTrackingUsageDescription</key><string>Track your hands to interact with the application.</string><key>NSAccessoryTrackingUsageDescription</key><string>Track spatial controllers for 6DOF input.</string><key>NSWorldSensingUsageDescription</key><string>Track your head position for 6DOF immersive experience.</string><key>UIApplicationSceneManifest</key><dict><key>UIApplicationPreferredDefaultSceneSessionRole</key><string>CPSceneSessionRoleImmersiveSpaceApplication</string><key>UIApplicationSupportsMultipleScenes</key><true/><key>UISceneConfigurations</key><dict><key>CPSceneSessionRoleImmersiveSpaceApplication</key><array><dict><key>UISceneInitialImmersionStyle</key><string>UIImmersionStyleFull</string></dict></array></dict></dict><key>UIApplicationExitsOnSuspend</key><true/><key>GCSupportsControllerUserInteraction</key><true/><key>GCSupportedGameControllers</key><array><dict><key>ProfileName</key><string>ExtendedGamepad</string></dict><dict><key>ProfileName</key><string>SpatialGamepad</string></dict></array>
+	<key>NSHandsTrackingUsageDescription</key><string>Track your hands to interact with the application.</string><key>NSAccessoryTrackingUsageDescription</key><string>Track spatial controllers for 6DOF input.</string><key>NSWorldSensingUsageDescription</key><string>Track your head position for 6DOF immersive experience.</string><key>UIApplicationSceneManifest</key><dict><key>UIApplicationPreferredDefaultSceneSessionRole</key><string>CPSceneSessionRoleImmersiveSpaceApplication</string><key>UIApplicationSupportsMultipleScenes</key><true/><key>UISceneConfigurations</key><dict><key>CPSceneSessionRoleImmersiveSpaceApplication</key><array><dict><key>UISceneInitialImmersionStyle</key><string>UIImmersionStyleFull</string></dict></array></dict></dict><key>GCSupportsControllerUserInteraction</key><true/><key>GCSupportedGameControllers</key><array><dict><key>ProfileName</key><string>ExtendedGamepad</string></dict><dict><key>ProfileName</key><string>SpatialGamepad</string></dict></array>
 </dict>
 </plist>
