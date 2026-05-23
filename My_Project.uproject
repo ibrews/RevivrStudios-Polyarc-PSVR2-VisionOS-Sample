@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "",
+	"EngineAssociation": "{52230D3C-9247-1F18-13C9-5A8D7A877D0A}",
 	"Category": "",
 	"Description": "",
 	"Modules": [
@@ -11,6 +11,15 @@
 		}
 	],
 	"Plugins": [
+		{
+			"Name": "ECABridge",
+			"Enabled": true,
+			"SupportedTargetPlatforms": [
+				"Mac",
+				"Win64",
+				"Linux"
+			]
+		},
 		{
 			"Name": "OpenXR",
 			"Enabled": true,

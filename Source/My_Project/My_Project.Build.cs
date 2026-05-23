@@ -10,7 +10,7 @@ public class My_Project : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "XRBase", "EnhancedInput" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "XRBase", "EnhancedInput", "HeadMountedDisplay" });
 
 		// SpatialAccessoryTracking plugin — needed for Swift bridge thumbstick input on visionOS
 		if (Target.Platform == UnrealTargetPlatform.VisionOS)

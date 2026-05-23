@@ -18,4 +18,14 @@ class MY_PROJECT_API UHMDStatusSubsystem : public UGameInstanceSubsystem
 	
 private:
 	void HmdReconnected();
+
+	// visionOS crown-exit clean shutdown: when the OS backgrounds us (crown
+	// press, app switch), force-exit so the next launch doesn't land in
+	// purgatory holding the previous immersive layer. The standard CVar
+	// `xr.OpenXRExitAppOnRuntimeDrivenSessionExit` does not fire on the
+	// OXRVisionOS plugin because it goes Running → cleanup without the
+	// intermediate STATE_EXITING that the CVar's listener watches for.
+	void OnAppDeactivated();
+	void OnAppBackgrounded();
+	void OnAppWillTerminate();
 };
