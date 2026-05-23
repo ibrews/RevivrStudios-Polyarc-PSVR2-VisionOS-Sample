@@ -51,3 +51,8 @@ Build/*/FileOpenOrder/
 # Re-apply generated plugin output ignores after the Plugins exception above
 Plugins/*/Binaries/
 Plugins/*/Intermediate/
+
+
+# ECABridge plugin is its own repo (ibrews/ECABridge) — install per-machine,
+# don't bundle (3.2GB+ would bloat clones)
+Plugins/ECABridge/
