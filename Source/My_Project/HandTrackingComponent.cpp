@@ -33,12 +33,14 @@ namespace
 	TArray<float> GSharedOpenRatios;       // size 5 once captured
 	TArray<float> GSharedCalibratedThresholds;  // size 5, zeroed before calibration
 
-	// Process-wide guard so a pinky-pinch level travel fires exactly once per
-	// transition. Set in TravelToOtherLevel, cleared in BeginPlay once the new
-	// world is up. Shared across both hand components and survives the world
-	// teardown (it's file-scope), which is exactly what blocks a second trigger
-	// (e.g. the other hand pinching the same frame) mid-teardown.
-	bool GLevelTravelInProgress = false;
+	// Cooldown (process-time) so one pinky-pinch = one level travel. Without it, a
+	// pinch HELD across the (sub-100ms) OpenLevel re-fires on the freshly-spawned hand
+	// component in the NEW level and travels straight back — flashing A<->B for a few
+	// frames until release. FPlatformTime::Seconds() persists across level loads (world
+	// time resets), so the window survives the world teardown. Also collapses a
+	// simultaneous both-hands pinch into a single travel.
+	double GLastLevelTravelSeconds = 0.0;
+	constexpr double GLevelTravelCooldownSeconds = 1.5;
 
 	void ResetSharedCalibration()
 	{
@@ -141,10 +143,6 @@ void UHandTrackingComponent::BeginPlay()
 		StartCalibration();
 	}
 
-	// New world is up — clear the cross-level travel guard so the next pinky pinch
-	// can travel again. (GLevelTravelInProgress is set in TravelToOtherLevel and
-	// would otherwise stay true forever after the first travel.)
-	GLevelTravelInProgress = false;
 }
 
 void UHandTrackingComponent::EnsureInstancesInitialized()
@@ -964,7 +962,11 @@ bool UHandTrackingComponent::IsInLevelB() const
 
 void UHandTrackingComponent::TravelToOtherLevel()
 {
-	if (GLevelTravelInProgress)
+	// Debounce on process time: ignore travels within the cooldown of the last one.
+	// This collapses a held pinch (which would otherwise re-fire in the freshly-loaded
+	// level and bounce A<->B) and a simultaneous both-hands pinch into ONE travel.
+	const double Now = FPlatformTime::Seconds();
+	if (Now - GLastLevelTravelSeconds < GLevelTravelCooldownSeconds)
 	{
 		return;
 	}
@@ -973,8 +975,8 @@ void UHandTrackingComponent::TravelToOtherLevel()
 	{
 		return;
 	}
+	GLastLevelTravelSeconds = Now;
 	const FString Target = IsInLevelB() ? LevelAPath : LevelBPath;
-	GLevelTravelInProgress = true;
 	UE_LOG(LogTemp, Warning, TEXT("HandTracking: pinky-pinch level travel -> %s"), *Target);
 	UGameplayStatics::OpenLevel(this, FName(*Target));
 }
