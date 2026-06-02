@@ -16,6 +16,73 @@
 
 namespace
 {
+	// V26: distal joints are the last bones before a Tip in each finger
+	// chain. Only these get explicit Z scaling (see DrivePoseableWithStrategy
+	// for why). Adding new keypoint enum values? Update this list too.
+	bool IsDistalKeypoint(EHandKeypoint Kp)
+	{
+		return Kp == EHandKeypoint::ThumbDistal
+			|| Kp == EHandKeypoint::IndexDistal
+			|| Kp == EHandKeypoint::MiddleDistal
+			|| Kp == EHandKeypoint::RingDistal
+			|| Kp == EHandKeypoint::LittleDistal;
+	}
+
+	// V27: metacarpal joints are the first bone in each finger chain (the
+	// "palm" bones). World-driving them from live OpenXR keypoints distorts
+	// the palm geometry and breaks thenar webbing. Default behavior is to
+	// skip them entirely so they inherit bind-relative transform from the
+	// wrist via the skeleton hierarchy.
+	bool IsMetacarpalKeypoint(EHandKeypoint Kp)
+	{
+		return Kp == EHandKeypoint::ThumbMetacarpal
+			|| Kp == EHandKeypoint::IndexMetacarpal
+			|| Kp == EHandKeypoint::MiddleMetacarpal
+			|| Kp == EHandKeypoint::RingMetacarpal
+			|| Kp == EHandKeypoint::LittleMetacarpal;
+	}
+
+	// V28: thumb chain keypoints (metacarpal + proximal + distal + tip).
+	// Used by the thumb test rig to apply per-strategy overrides only to
+	// thumb bones, leaving the other fingers driven normally.
+	bool IsThumbKeypoint(EHandKeypoint Kp)
+	{
+		return Kp == EHandKeypoint::ThumbMetacarpal
+			|| Kp == EHandKeypoint::ThumbProximal
+			|| Kp == EHandKeypoint::ThumbDistal
+			|| Kp == EHandKeypoint::ThumbTip;
+	}
+
+	// V28: per-ghost thumb-strategy slot table (the A-F cycle order).
+	EThumbStrategyTest GetThumbStrategyForGhost(int32 GhostIndex)
+	{
+		switch (GhostIndex)
+		{
+			case 0: return EThumbStrategyTest::SkipThumb01;
+			case 1: return EThumbStrategyTest::DriveAllNormal;
+			case 2: return EThumbStrategyTest::ScaleDown;
+			case 3: return EThumbStrategyTest::PullTowardWrist15;
+			case 4: return EThumbStrategyTest::PullTowardWrist30;
+			case 5: return EThumbStrategyTest::SkipAllThumb;
+		}
+		return EThumbStrategyTest::SkipThumb01;
+	}
+
+	// V28: short label for on-device readout.
+	const TCHAR* GetThumbStrategyLetter(EThumbStrategyTest S)
+	{
+		switch (S)
+		{
+			case EThumbStrategyTest::SkipThumb01:        return TEXT("A: skip thumb_01");
+			case EThumbStrategyTest::DriveAllNormal:     return TEXT("B: drive all");
+			case EThumbStrategyTest::ScaleDown:          return TEXT("C: 0.8x scale");
+			case EThumbStrategyTest::PullTowardWrist15:  return TEXT("D: pull 1.5cm");
+			case EThumbStrategyTest::PullTowardWrist30:  return TEXT("E: pull 3cm");
+			case EThumbStrategyTest::SkipAllThumb:       return TEXT("F: skip all");
+		}
+		return TEXT("?");
+	}
+
 	IHandTracker* FindSkeletalHandTracker()
 	{
 		IModularFeatures& Features = IModularFeatures::Get();
@@ -439,39 +506,31 @@ void UHandSkeletalDriverComponent::TickComponent(float DeltaTime, ELevelTick Tic
 				continue;
 			}
 
-			// V23: same finger formula across all ghosts; per-ghost wrist
-			// adjustment is the variable being tested.
+			// V28: wrist correction is locked via WristAdjustRotation (applied
+			// to WristXform earlier in Tick); the cycling variable is now the
+			// per-ghost thumb strategy. Finger formula remains locked too.
 			const EBoneRotationStrategy Strat = GetStrategyForGhost(i);
-			const EWristAdjustTest WristTest = GetWristAdjustForGhost(i);
-			const FQuat WristTestQuat = ComputeWristAdjustQuat(WristTest);
-
-			// Build the adjusted wrist transform. Both the mesh placement
-			// AND the finger-twist-lock reference (wristForward) use the
-			// adjusted rotation, so fingers stay anatomically attached to
-			// the rotated wrist — what you see is what a real bound-rig
-			// would render.
-			FTransform AdjustedWristXform = WristXform;
-			AdjustedWristXform.SetRotation(WristXform.GetRotation() * WristTestQuat);
+			const EThumbStrategyTest ThumbStrat = GetThumbStrategyForGhost(i);
 
 			if (bHaveWrist)
 			{
-				P->SetWorldLocationAndRotation(AdjustedWristXform.GetLocation(), AdjustedWristXform.GetRotation());
+				P->SetWorldLocationAndRotation(WristXform.GetLocation(), WristXform.GetRotation());
 				const FName WristBone = ResolveBoneName(EHandKeypoint::Wrist);
 				if (!WristBone.IsNone())
 				{
-					P->SetBoneTransformByName(WristBone, AdjustedWristXform, EBoneSpaces::WorldSpace);
+					P->SetBoneTransformByName(WristBone, WristXform, EBoneSpaces::WorldSpace);
 				}
 			}
 			P->SetVisibility(true);
-			DrivePoseableWithStrategy(P, Strat, AdjustedWristXform, Tracker, Hand);
+			DrivePoseableWithStrategy(P, Strat, ThumbStrat, WristXform, Tracker, Hand);
 
 #if ENABLE_DRAW_DEBUG
 			if (World && bHaveWrist)
 			{
-				const FVector LabelPos = AdjustedWristXform.GetLocation() + FVector(0.0f, 0.0f, TestRigHeightAboveWristCm);
+				const FVector LabelPos = WristXform.GetLocation() + FVector(0.0f, 0.0f, TestRigHeightAboveWristCm);
 				const FString LabelText = FString::Printf(
-					TEXT("WRIST %s [%s] %.1fs"),
-					GetWristAdjustLetter(WristTest),
+					TEXT("THUMB %s [%s] %.1fs"),
+					GetThumbStrategyLetter(ThumbStrat),
 					bIsRight ? TEXT("R") : TEXT("L"),
 					TimeRemaining);
 				DrawDebugString(World, LabelPos, LabelText, nullptr, FColor::Yellow, 0.0f, true, 2.0f);
@@ -496,7 +555,11 @@ void UHandSkeletalDriverComponent::TickComponent(float DeltaTime, ELevelTick Tic
 			}
 		}
 		P->SetVisibility(true);
-		DrivePoseableWithStrategy(P, ActiveStrategy, WristXform, Tracker, Hand);
+		// V29: single-mesh mode uses the configurable thumb strategy. Default
+		// is B (DriveAllNormal) per v28 testing — accurate spatial tracking
+		// at the cost of "thick thumb" visual, which the thenar_extend morph
+		// target compensates for once authored.
+		DrivePoseableWithStrategy(P, ActiveStrategy, ActiveThumbStrategy, WristXform, Tracker, Hand);
 	}
 }
 
@@ -518,6 +581,7 @@ FRotator UHandSkeletalDriverComponent::ComputeBoneRotation(
 void UHandSkeletalDriverComponent::DrivePoseableWithStrategy(
 	UPoseableMeshComponent* Pose,
 	EBoneRotationStrategy Strategy,
+	EThumbStrategyTest ThumbStrategy,
 	const FTransform& WristXform,
 	IHandTracker* Tracker,
 	EControllerHand Hand) const
@@ -532,6 +596,32 @@ void UHandSkeletalDriverComponent::DrivePoseableWithStrategy(
 			continue;
 		}
 
+		const bool bIsThumb = IsThumbKeypoint(Keypoint);
+
+		// V27: skip metacarpals so the palm/thenar-webbing geometry stays
+		// at bind shape. V28 carves out the thumb metacarpal — its handling
+		// is governed by ThumbStrategy below (the test rig overrides v27's
+		// thumb_01 skip per-strategy).
+		if (bSkipMetacarpalBones && IsMetacarpalKeypoint(Keypoint) && !bIsThumb)
+		{
+			continue;
+		}
+
+		// V28 thumb test rig: per-strategy skips applied before fetching state.
+		if (bIsThumb)
+		{
+			switch (ThumbStrategy)
+			{
+				case EThumbStrategyTest::SkipAllThumb:
+					continue;
+				case EThumbStrategyTest::SkipThumb01:
+					if (Keypoint == EHandKeypoint::ThumbMetacarpal) { continue; }
+					break;
+				default:
+					break;  // DriveAllNormal / ScaleDown / Pull* drive every thumb bone
+			}
+		}
+
 		const FName BoneName = ResolveBoneName(Keypoint);
 		if (BoneName.IsNone())
 		{
@@ -543,6 +633,17 @@ void UHandSkeletalDriverComponent::DrivePoseableWithStrategy(
 		if (!Tracker->GetKeypointState(Hand, Keypoint, ThisXform, Radius))
 		{
 			continue;
+		}
+
+		// V28 thumb test rig: pull thumb keypoints toward the wrist to reduce
+		// abduction (closes the thenar-webbing gap visually). Applied to
+		// every thumb bone so the whole chain shifts cohesively.
+		if (bIsThumb && (ThumbStrategy == EThumbStrategyTest::PullTowardWrist15
+		                || ThumbStrategy == EThumbStrategyTest::PullTowardWrist30))
+		{
+			const float OffsetCm = (ThumbStrategy == EThumbStrategyTest::PullTowardWrist15) ? 1.5f : 3.0f;
+			const FVector ToWrist = (WristXform.GetLocation() - ThisXform.GetLocation()).GetSafeNormal();
+			ThisXform.SetLocation(ThisXform.GetLocation() + ToWrist * OffsetCm);
 		}
 
 		const EHandKeypoint NextKp = NextKeypointInChain(Keypoint);
@@ -564,30 +665,35 @@ void UHandSkeletalDriverComponent::DrivePoseableWithStrategy(
 
 		const FRotator BoneRot = ComputeBoneRotation(Strategy, AimDirection, WristXform, ThisXform.GetRotation());
 
-		// V25: stretch this bone along its bone-along (Z) axis so the mesh
-		// segment between this joint and the next matches the user's actual
-		// hand. For non-distal bones we look up the NEXT bone's bind-pose
-		// distance from its parent (= bind distance from this bone to next).
-		// For distal bones (the next keypoint is a Tip with no bone), we use
-		// THIS bone's own bind length as a proxy for how far the mesh
-		// extends past it — empirically close enough on Manny-XR.
+		// V26: distal-only Z scale. Non-distal bones already render correctly
+		// because we WORLD-position every joint — vertices between them
+		// interpolate via skinning. Only the mesh PAST the distal bone is
+		// skinned ~100% to it and needs an explicit scale to make the
+		// rendered fingertip reach the user's actual fingertip. Scaling
+		// non-distal bones (v25) pulled thumb thenar-webbing vertices
+		// away from the index area and made the thumb look oversized.
 		FVector BoneScale = FVector::OneVector;
-		if (bScaleBonesToHandSize && ActualSegLen > KINDA_SMALL_NUMBER)
+		if (bScaleBonesToHandSize
+			&& ActualSegLen > KINDA_SMALL_NUMBER
+			&& IsDistalKeypoint(Keypoint)
+			&& BindKeypointLengths.Contains(Keypoint))
 		{
-			float BindLen = 0.0f;
-			const FName NextBoneName = (NextKp != Keypoint) ? ResolveBoneName(NextKp) : NAME_None;
-			if (!NextBoneName.IsNone() && BindKeypointLengths.Contains(NextKp))
+			// Bind-pose mesh-past-distal-tip length ≈ distal bone bind length
+			// × DistalTipMeshFactor (0.5 default; the mesh tapers past the
+			// bone tip and ends about halfway out empirically on Manny-XR).
+			const float BindMeshExtension = BindKeypointLengths[Keypoint] * DistalTipMeshFactor;
+			if (BindMeshExtension > KINDA_SMALL_NUMBER)
 			{
-				BindLen = BindKeypointLengths[NextKp];
+				BoneScale = FVector(1.0f, 1.0f, ActualSegLen / BindMeshExtension);
 			}
-			else if (BindKeypointLengths.Contains(Keypoint))
-			{
-				BindLen = BindKeypointLengths[Keypoint];
-			}
-			if (BindLen > KINDA_SMALL_NUMBER)
-			{
-				BoneScale = FVector(1.0f, 1.0f, ActualSegLen / BindLen);
-			}
+		}
+
+		// V28 thumb test rig: uniform 0.8x scale on every thumb bone to test
+		// "is the thumb visually huge because it's just too big?" Overrides
+		// the distal-only Z scale above for thumb keypoints specifically.
+		if (bIsThumb && ThumbStrategy == EThumbStrategyTest::ScaleDown)
+		{
+			BoneScale = FVector(0.8f, 0.8f, 0.8f);
 		}
 
 		const FTransform BoneXform(BoneRot, ThisXform.GetLocation(), BoneScale);

@@ -9,6 +9,10 @@
 #include "Features/IModularFeatures.h"
 #include "HeadMountedDisplayTypes.h"
 #include "IHandTracker.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "Misc/PackageName.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -28,6 +32,13 @@ namespace
 	TArray<float> GSharedFistRatios;       // size 5 once captured
 	TArray<float> GSharedOpenRatios;       // size 5 once captured
 	TArray<float> GSharedCalibratedThresholds;  // size 5, zeroed before calibration
+
+	// Process-wide guard so a pinky-pinch level travel fires exactly once per
+	// transition. Set in TravelToOtherLevel, cleared in BeginPlay once the new
+	// world is up. Shared across both hand components and survives the world
+	// teardown (it's file-scope), which is exactly what blocks a second trigger
+	// (e.g. the other hand pinching the same frame) mid-teardown.
+	bool GLevelTravelInProgress = false;
 
 	void ResetSharedCalibration()
 	{
@@ -129,6 +140,11 @@ void UHandTrackingComponent::BeginPlay()
 	{
 		StartCalibration();
 	}
+
+	// New world is up — clear the cross-level travel guard so the next pinky pinch
+	// can travel again. (GLevelTravelInProgress is set in TravelToOtherLevel and
+	// would otherwise stay true forever after the first travel.)
+	GLevelTravelInProgress = false;
 }
 
 void UHandTrackingComponent::EnsureInstancesInitialized()
@@ -183,6 +199,13 @@ void UHandTrackingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	EnsureInstancesInitialized();
+
+	// Level banner draws independently of hand tracking so it's visible even when
+	// the hands aren't in view. Left instance only, to avoid drawing it twice.
+	if (bShowLevelLabel && !bIsRight)
+	{
+		DrawLevelLabel();
+	}
 
 	IHandTracker* Tracker = FindHandTracker();
 	const bool bTrackerValid = Tracker && Tracker->IsHandTrackingStateValid();
@@ -364,6 +387,13 @@ void UHandTrackingComponent::UpdatePinkyPinchState(const FTransform& ThumbTipWor
 		{
 			const FVector Midpoint = (ThumbTipWorld.GetLocation() + PinkyTipWorld.GetLocation()) * 0.5f;
 			SpawnExplosion(Midpoint);
+		}
+		// Pinky-to-thumb pinch toggles Level A <-> Level B (test). The
+		// GLevelTravelInProgress guard inside TravelToOtherLevel makes a
+		// simultaneous both-hands pinch fire only once.
+		if (bPinchToTravel)
+		{
+			TravelToOtherLevel();
 		}
 	}
 	else if (bIsPinkyPinching && DistanceCm >= ExitCm)
@@ -683,13 +713,17 @@ EHandGesture UHandTrackingComponent::ClassifyGestureByConfidence(const float Nor
 		int8 Thumb, Index, Middle, Ring, Little;
 	};
 	static const FFingerprint Fingerprints[] = {
-		{ EHandGesture::OpenPalm,    1,  1,  1,  1,  1 },
-		{ EHandGesture::Fist,        0,  0,  0,  0,  0 },
-		{ EHandGesture::ThumbsUp,    1,  0,  0,  0,  0 },
-		{ EHandGesture::Peace,       0,  1,  1,  0,  0 },
-		{ EHandGesture::FingerGuns,  1,  1,  0,  0,  0 },
-		{ EHandGesture::CallMe,      1,  0,  0,  0,  1 },
-		{ EHandGesture::RockOn,     -1,  1,  0,  0,  1 },
+		{ EHandGesture::OpenPalm,         1,  1,  1,  1,  1 },
+		{ EHandGesture::Fist,             0,  0,  0,  0,  0 },
+		{ EHandGesture::ThumbsUp,         1,  0,  0,  0,  0 },
+		{ EHandGesture::Peace,            0,  1,  1,  0,  0 },
+		{ EHandGesture::FingerGuns,       1,  1,  0,  0,  0 },
+		{ EHandGesture::FingerGunsShoot,  0,  1,  0,  0,  0 },
+		{ EHandGesture::CallMe,           1,  0,  0,  0,  1 },
+		{ EHandGesture::RockOn,          -1,  1,  0,  0,  1 },
+		// V27: ThumbOverFist intentionally NOT in this table — it shares the
+		// {1,0,0,0,0} curl pattern with ThumbsUp. Orientation disambiguation
+		// happens post-classification in UpdateGestureState.
 	};
 
 	float TopScore = 0.0f;
@@ -743,6 +777,27 @@ EHandGesture UHandTrackingComponent::ClassifyGestureByConfidence(const float Nor
 	return TopGesture;
 }
 
+float UHandTrackingComponent::ComputeThumbUpAlignment() const
+{
+	// V27: thumb direction = (thumb tip world position) − (thumb metacarpal
+	// world position), normalized; then dotted with world up. Returns:
+	//   ~+1  →  thumb pointing straight up (genuine ThumbsUp)
+	//    0   →  thumb horizontal (typical ThumbOverFist pose, where the
+	//           thumb is laid across the curled fingers)
+	//   ~-1  →  thumb pointing straight down
+	// Reads from the per-frame cached keypoint transforms, so this is
+	// effectively free to call once per Tick after UpdateKeypoints has
+	// populated the cache.
+	const FTransform ThumbTipX  = GetKeypointWorldTransform(EHandKeypoint::ThumbTip);
+	const FTransform ThumbMetaX = GetKeypointWorldTransform(EHandKeypoint::ThumbMetacarpal);
+	const FVector ThumbDir = (ThumbTipX.GetLocation() - ThumbMetaX.GetLocation()).GetSafeNormal();
+	if (ThumbDir.IsNearlyZero())
+	{
+		return 0.0f;
+	}
+	return FVector::DotProduct(ThumbDir, FVector::UpVector);
+}
+
 void UHandTrackingComponent::UpdateGestureState(float DeltaTime)
 {
 	// Confidence-based classification: each gesture has an expected
@@ -759,7 +814,20 @@ void UHandTrackingComponent::UpdateGestureState(float DeltaTime)
 	NormalizedRatios[4] = NormalizeFingerRatio(4, ComputeFingerExtensionRatio(EHandKeypoint::LittleTip));
 
 	float TopConfidence = 0.0f;
-	const EHandGesture Detected = ClassifyGestureByConfidence(NormalizedRatios, TopConfidence);
+	EHandGesture Detected = ClassifyGestureByConfidence(NormalizedRatios, TopConfidence);
+
+	// V27: orientation-aware disambiguation. The curl-pattern classifier
+	// can't distinguish "thumb genuinely pointing up" from "thumb laid flat
+	// across the curled fingers" — both have thumb extended + everything
+	// else curled. Use the 3D thumb direction vs world up to split them.
+	if (Detected == EHandGesture::ThumbsUp)
+	{
+		const float UpAlignment = ComputeThumbUpAlignment();
+		if (UpAlignment < ThumbUpAlignmentThreshold)
+		{
+			Detected = EHandGesture::ThumbOverFist;
+		}
+	}
 
 	if (Detected == PendingGesture)
 	{
@@ -880,6 +948,67 @@ FTransform UHandTrackingComponent::GetKeypointWorldTransform(EHandKeypoint Keypo
 	return FTransform::Identity;
 }
 
+bool UHandTrackingComponent::IsInLevelB() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+	// GetMapName() returns the short package name, possibly with a PIE streaming
+	// prefix (e.g. "UEDPIE_0_TravelTestMap"). Compare against LevelBPath's leaf name.
+	FString MapName = World->GetMapName();
+	MapName.RemoveFromStart(World->StreamingLevelsPrefix);
+	return MapName.Equals(FPackageName::GetShortName(LevelBPath), ESearchCase::IgnoreCase);
+}
+
+void UHandTrackingComponent::TravelToOtherLevel()
+{
+	if (GLevelTravelInProgress)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	const FString Target = IsInLevelB() ? LevelAPath : LevelBPath;
+	GLevelTravelInProgress = true;
+	UE_LOG(LogTemp, Warning, TEXT("HandTracking: pinky-pinch level travel -> %s"), *Target);
+	UGameplayStatics::OpenLevel(this, FName(*Target));
+}
+
+void UHandTrackingComponent::DrawLevelLabel() const
+{
+#if ENABLE_DRAW_DEBUG
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	const bool bLevelB = IsInLevelB();
+	const FString Text = bLevelB
+		? TEXT("LEVEL B\npinky-pinch -> back to A")
+		: TEXT("LEVEL A\npinky-pinch -> travel to B");
+	// Level B reads cyan, Level A green — an instant, unmistakable colour flip on travel.
+	const FColor Color = bLevelB ? FColor(80, 200, 255) : FColor(120, 255, 120);
+
+	// Anchor the banner ~2 m in front of the player's camera (HMD) so it's always in view.
+	FVector Anchor(0.0f, 0.0f, 150.0f);
+	if (APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (PC->PlayerCameraManager)
+		{
+			const FVector CamLoc = PC->PlayerCameraManager->GetCameraLocation();
+			const FRotator CamRot = PC->PlayerCameraManager->GetCameraRotation();
+			Anchor = CamLoc + CamRot.Vector() * 200.0f + FVector(0.0f, 0.0f, 25.0f);
+		}
+	}
+	DrawDebugString(World, Anchor, Text, nullptr, Color, 0.0f, true, 4.0f);
+#endif
+}
+
 void UHandTrackingComponent::EnsureLabelInitialized()
 {
 	// No-op — DrawDebugString is per-frame and needs no persistent component.
@@ -895,7 +1024,7 @@ FString UHandTrackingComponent::BuildLabelText() const
 		// Build version marker bumped each pass to confirm new install
 		// actually loaded on device — visionOS sometimes serves a cached
 		// bundle, and "looks the same" can mean "stale cache".
-		FString CalHeadline = TEXT("[v25] ");
+		FString CalHeadline = TEXT("[v29] ");
 		switch (CalibrationState)
 		{
 			case EHandCalibrationState::Uncalibrated:
@@ -942,13 +1071,15 @@ FString UHandTrackingComponent::BuildLabelText() const
 	{
 		switch (ActiveGesture)
 		{
-			case EHandGesture::OpenPalm:   Headline = TEXT("OPEN PALM");   break;
-			case EHandGesture::Fist:       Headline = TEXT("FIST");        break;
-			case EHandGesture::ThumbsUp:   Headline = TEXT("THUMBS UP");   break;
-			case EHandGesture::Peace:      Headline = TEXT("PEACE");       break;
-			case EHandGesture::FingerGuns: Headline = TEXT("FINGER GUNS"); break;
-			case EHandGesture::RockOn:     Headline = TEXT("ROCK ON");     break;
-			case EHandGesture::CallMe:     Headline = TEXT("CALL ME");     break;
+			case EHandGesture::OpenPalm:        Headline = TEXT("OPEN PALM");        break;
+			case EHandGesture::Fist:            Headline = TEXT("FIST");             break;
+			case EHandGesture::ThumbsUp:        Headline = TEXT("THUMBS UP");        break;
+			case EHandGesture::Peace:           Headline = TEXT("PEACE");            break;
+			case EHandGesture::FingerGuns:      Headline = TEXT("FINGER GUNS");      break;
+			case EHandGesture::FingerGunsShoot: Headline = TEXT("FINGER GUNS SHOT"); break;
+			case EHandGesture::RockOn:          Headline = TEXT("ROCK ON");          break;
+			case EHandGesture::CallMe:          Headline = TEXT("CALL ME");          break;
+			case EHandGesture::ThumbOverFist:   Headline = TEXT("THUMB OVER FIST");  break;
 			default: break;
 		}
 	}

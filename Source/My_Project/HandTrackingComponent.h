@@ -30,14 +30,23 @@ enum class EHandTrackingSide : uint8
 UENUM(BlueprintType)
 enum class EHandGesture : uint8
 {
-	None       UMETA(DisplayName = "None"),
-	OpenPalm   UMETA(DisplayName = "Open Palm"),
-	Fist       UMETA(DisplayName = "Fist"),
-	ThumbsUp   UMETA(DisplayName = "Thumbs Up"),
-	Peace      UMETA(DisplayName = "Peace"),
-	FingerGuns UMETA(DisplayName = "Finger Guns"),
-	RockOn     UMETA(DisplayName = "Rock On"),
-	CallMe     UMETA(DisplayName = "Call Me")
+	None            UMETA(DisplayName = "None"),
+	OpenPalm        UMETA(DisplayName = "Open Palm"),
+	Fist            UMETA(DisplayName = "Fist"),
+	ThumbsUp        UMETA(DisplayName = "Thumbs Up"),
+	Peace           UMETA(DisplayName = "Peace"),
+	FingerGuns      UMETA(DisplayName = "Finger Guns"),
+	RockOn          UMETA(DisplayName = "Rock On"),
+	CallMe          UMETA(DisplayName = "Call Me"),
+	// V27: split from ThumbsUp via thumb-direction orientation check. Same
+	// curl pattern {1,0,0,0,0}; ThumbsUp requires the thumb to be pointing
+	// up against gravity, ThumbOverFist is the "thumb laid across knuckles"
+	// pose (common fist-bump / closed-fist-with-thumb-on-top variant).
+	ThumbOverFist   UMETA(DisplayName = "Thumb Over Fist"),
+	// V27: the "shot" version of finger guns. Pattern {0,1,0,0,0} (index
+	// extended, thumb folded onto fist). Distinct from FingerGuns
+	// ({1,1,0,0,0}) which is the "cocked" version with the thumb up.
+	FingerGunsShoot UMETA(DisplayName = "Finger Guns (Shot)")
 };
 
 // Per-user calibration walks the user through two reference poses and
@@ -262,6 +271,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Gestures", meta = (ClampMin = "0.0", ClampMax = "0.5"))
 	float MinGestureConfidenceMargin = 0.05f;
 
+	// V27: minimum dot(thumbDirection, worldUp) for a {1,0,0,0,0} curl pose
+	// to count as ThumbsUp rather than ThumbOverFist. 0.5 = ~60° cone around
+	// vertical; 0.707 = ~45° cone; 1.0 = strictly straight up. Lower this
+	// if ThumbsUp doesn't trigger when your thumb is tilted; raise it if
+	// ThumbsUp fires for poses you intended as ThumbOverFist.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Gestures", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ThumbUpAlignmentThreshold = 0.5f;
+
 	UPROPERTY(BlueprintAssignable, Category = "Hand Tracking|Gestures")
 	FHandTrackingGestureEvent OnGestureStarted;
 
@@ -310,6 +327,26 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Hand Tracking")
 	bool IsTracking() const { return bIsTracking; }
 
+	// TEST: a pinky-to-thumb pinch toggles between Level A and Level B so you can
+	// exercise OpenLevel world-teardown→load on-device in real time. Either hand
+	// triggers it; a process-wide guard prevents a double-trigger mid-teardown.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Test")
+	bool bPinchToTravel = true;
+
+	// Level A — the default map.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Test")
+	FString LevelAPath = TEXT("/Game/VRTemplate/Maps/VRTemplateMap");
+
+	// Level B — a duplicate of Level A under a distinct name, so a successful travel
+	// is unmistakable: the floating "LEVEL A" / "LEVEL B" label (and its colour) flips.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Test")
+	FString LevelBPath = TEXT("/Game/VRTemplate/Maps/TravelTestMap");
+
+	// Draw a large floating "LEVEL A" / "LEVEL B" banner in front of the player so the
+	// current level is obvious at a glance. Rendered by the left-hand instance only.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Test")
+	bool bShowLevelLabel = true;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -344,6 +381,9 @@ private:
 	bool IsFingerExtended(EHandKeypoint TipKey) const;
 	EHandGesture ClassifyGesture(bool bThumb, bool bIndex, bool bMiddle, bool bRing, bool bLittle) const;
 	EHandGesture ClassifyGestureByConfidence(const float NormalizedRatios[5], float& OutTopConfidence) const;
+	// V27: returns dot(thumbDir, worldUp), where thumbDir = ThumbTip - ThumbMetacarpal.
+	// Used to disambiguate ThumbsUp from ThumbOverFist post-classification.
+	float ComputeThumbUpAlignment() const;
 	void UpdateGestureState(float DeltaTime);
 	void SpawnGestureVisual(EHandGesture Gesture, const FTransform& PalmTransform);
 	void SpawnTransientSphere(const FVector& WorldLocation, float RadiusCm, float DurationSec);
@@ -370,4 +410,12 @@ private:
 	TArray<TArray<float>> CalibrationStabilityWindow; // [finger][frame] last N samples
 	float CalibrationCurrentStableSec = 0.0f;
 	static constexpr int32 CalibrationStabilityWindowSize = 30;
+
+	// Pinky-pinch level toggle (test). Travels to whichever of LevelAPath / LevelBPath
+	// is NOT the current map. No-op while a travel is already in flight.
+	void TravelToOtherLevel();
+	// True when the current map is Level B (TravelTestMap).
+	bool IsInLevelB() const;
+	// Draw the big "LEVEL A/B" banner in front of the player (left instance only).
+	void DrawLevelLabel() const;
 };

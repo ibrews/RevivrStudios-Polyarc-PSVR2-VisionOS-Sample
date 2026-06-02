@@ -51,6 +51,30 @@ enum class EWristAdjustTest : uint8
 	RollPlus   UMETA(DisplayName = "F: Roll +90 (around forward / bone axis)")
 };
 
+// V28: with finger formula and wrist correction locked, the open issue is
+// the thumb's visual proportions and the thenar-webbing gap (the mesh's
+// webbing is geometrically thin and doesn't fill space when the user's
+// thumb is widely abducted). These six strategies cycle different thumb
+// driving behaviors to find the best procedural compromise. The "real"
+// fix is a thenar_extend morph target authored in Blender; this rig is
+// to land an acceptable visual without that.
+UENUM(BlueprintType)
+enum class EThumbStrategyTest : uint8
+{
+	// A: current v27 — skip thumb_01 only, drive thumb_02 + thumb_03 with full live position
+	SkipThumb01        UMETA(DisplayName = "A: skip thumb_01 (v27 baseline)"),
+	// B: pre-v27 — drive ALL thumb bones from live OpenXR positions
+	DriveAllNormal     UMETA(DisplayName = "B: drive all thumb bones live"),
+	// C: drive normally but apply uniform 0.8x scale to every thumb bone
+	ScaleDown          UMETA(DisplayName = "C: scale thumb bones 0.8x"),
+	// D: drive normally but pull every thumb keypoint 1.5 cm toward the wrist (reduces abduction)
+	PullTowardWrist15  UMETA(DisplayName = "D: pull thumb 1.5cm toward wrist"),
+	// E: same as D but 3 cm (more aggressive)
+	PullTowardWrist30  UMETA(DisplayName = "E: pull thumb 3cm toward wrist"),
+	// F: skip every thumb bone — thumb stays at bind pose, no articulation but stable webbing
+	SkipAllThumb       UMETA(DisplayName = "F: skip all thumb bones (bind pose)")
+};
+
 UCLASS(ClassGroup = (VR), meta = (BlueprintSpawnableComponent), DisplayName = "Hand Skeletal Driver")
 class MY_PROJECT_API UHandSkeletalDriverComponent : public USceneComponent
 {
@@ -102,14 +126,36 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver|Tuning")
 	FRotator WristAdjustRotation = FRotator(0.0f, 0.0f, 90.0f);
 
-	// V25: stretch each bone along its bone-along (Z) axis to match the user's
-	// actual hand size. Scale ratio = (live OpenXR segment length) / (mesh's
-	// bind-pose segment length). Without this, users whose fingers are longer
-	// than the Manny-XR rig's bind pose see fingertip-reach mismatch — e.g.
-	// pinky tips can't touch in real life. Per-bone scale handles per-finger
-	// proportion differences (long pinky, short index, etc.) automatically.
+	// V26: stretch DISTAL bones only along their bone-along (Z) axis so the
+	// fingertip mesh reaches where the user's actual fingertip is. Earlier
+	// v25 scaled every bone, but that pulled apart thumb-thenar webbing
+	// vertices and made the thumb look oversized — vertices between
+	// non-distal bones already interpolate correctly because we WORLD-
+	// position every bone. Only the mesh PAST the distal bone (skinned
+	// 100% to it) needs explicit scaling.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver|Tuning")
 	bool bScaleBonesToHandSize = true;
+
+	// Empirical multiplier on the distal bone's bind length, used as a proxy
+	// for "how far the mesh actually extends past the distal bone tip at
+	// unit scale". The mesh tapers and the visible fingertip ends some
+	// fraction of the bone's length past the bone tip on Manny-XR. Lower
+	// values produce longer rendered fingertips (smaller proxy → bigger
+	// scale ratio). v25 default 1.0 → ~5cm short pinky reach. v26 0.5 →
+	// ~1cm short. v27 default 0.3 to close that residual gap empirically.
+	// Dial up toward 0.5+ if fingertips overshoot.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver|Tuning", meta = (ClampMin = "0.1", ClampMax = "2.0"))
+	float DistalTipMeshFactor = 0.3f;
+
+	// V27: when true, do NOT world-position the five metacarpal bones
+	// (ThumbMetacarpal, Index/Middle/Ring/LittleMetacarpal). They inherit
+	// from the wrist via the skeleton hierarchy at bind-pose relative
+	// transform, keeping palm geometry rigid. Driving the thumb metacarpal
+	// from the live OpenXR keypoint pulled thenar-webbing vertices ~5 cm
+	// away from the palm and made the thumb look oversized. Finger
+	// articulation still drives correctly from the proximal joints onward.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver|Tuning")
+	bool bSkipMetacarpalBones = true;
 
 	// At BeginPlay, search the owning actor for sibling components named
 	// "HandLeft" / "HandRight" (the PSVR2 controller-attached mannequin
@@ -134,6 +180,14 @@ public:
 	// skeletal mesh.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver|Test")
 	bool bMultiStrategyTest = false;
+
+	// V29: locked thumb strategy used in single-mesh mode. B (DriveAllNormal)
+	// won the v28 thumb test rig on spatial accuracy — user's real thumbs
+	// touching produces rendered thumbs touching. The visible "thick thumb"
+	// is now addressed via the thenar_extend morph target (see Blender
+	// authoring flow in HANDOFF_HAND_TRACKING.md) driven by abduction angle.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver|Tuning")
+	EThumbStrategyTest ActiveThumbStrategy = EThumbStrategyTest::DriveAllNormal;
 
 	// Centimeters above the wrist to anchor the first test ghost.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver|Test", meta = (ClampMin = "5.0", ClampMax = "100.0"))
@@ -182,6 +236,7 @@ private:
 	void DrivePoseableWithStrategy(
 		UPoseableMeshComponent* Pose,
 		EBoneRotationStrategy Strategy,
+		EThumbStrategyTest ThumbStrategy,
 		const FTransform& WristXform,
 		IHandTracker* Tracker,
 		EControllerHand Hand) const;
