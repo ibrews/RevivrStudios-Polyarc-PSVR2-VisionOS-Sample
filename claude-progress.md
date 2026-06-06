@@ -1,3 +1,45 @@
+# ⭐ CURRENT — Pinchwork plugin spin-off (2026-06-06)
+
+**Goal:** extract the owned hand-tracking system into a standalone, sellable UE plugin +
+clean-room demo, leaving the Polyarc/Revivr (MIT) PSVR2 sample code untouched.
+
+**Branch:** `spinoff/pinchwork-plugin` — NOT merged to `main`, NOT pushed. All reversible.
+
+**Decisions (user-approved):** product = plugin + demo template; demo = clean-room (Epic +
+own content only, zero Polyarc); engine fix = separate `.patch`. Attribution = **Alex Coulombe**
+(ibrews rule), MIT.
+
+**Done + VERIFIED this session:**
+- `Plugins/Pinchwork/` — owned MIT plugin. Both components (`HandTrackingComponent`,
+  `HandSkeletalDriverComponent`) moved in with git history; `MY_PROJECT_API`→`PINCHWORK_API`.
+- Seam was already dead: removed vestigial `#include "GamepadInputSetup.h"` → plugin has ZERO
+  Polyarc deps. (grab is self-contained; gun-fire injects via Enhanced Input.)
+- Dev project kept working: plugin enabled in `.uproject`, `[CoreRedirects]` repoint
+  `VRPawn.uasset`, `My_Project.Build.cs` depends on Pinchwork.
+- ✅ **Compile verified** headless: `Module.Pinchwork.cpp` builds, `UnrealEditor-Pinchwork.dylib`
+  links, `** BUILD SUCCEEDED **` (incremental `My_ProjectEditor`, ~92s).
+- ✅ **Redirects verified** headless (linker load): classes resolve at `/Script/Pinchwork.*`,
+  `vrpawn_loaded=True`, zero old-path class-resolution errors.
+- ✅ Phase 5: `Plugins/Pinchwork/EnginePatches/0001-arm64-lightmass.patch` (+ EULA-carveout README),
+  integrity-checked via `git apply --reverse --check`.
+
+**⚠️ OPEN FLAGS:**
+1. **Plugin not yet portable** — its constructor still hard-refs `/Game/...` content (the `IA_*`
+   actions). Builds *inside the dev project*; a blank-project buyer won't get the input actions
+   until **Phase 3** migrates content into the plugin's `Content/` (editor + redirector fixup).
+2. **Engine commit `4f59b2fea5c6` is LOCAL-ONLY** — the arm64-Lightmass port is NOT pushed to
+   `ibrews/UnrealEngine` (`branch -r --contains` empty). At risk until pushed. (The `.patch` in
+   the plugin is a mitigation, but the engine fork itself should be pushed.)
+
+**PENDING (need the UE editor, via ECABridge/ue5-mcp — user drives the editor, I script it):**
+- Phase 3: migrate `IA_*` input actions + WA/glass materials into `Plugins/Pinchwork/Content/`,
+  repoint the C++ `ConstructorHelpers` paths `/Game/...`→`/Pinchwork/...`, resave `VRPawn`
+  (bakes new class path; lets `CoreRedirects` be dropped later).
+- Phase 4: clean-room demo `.uproject` (Epic + own content only).
+- Phase 6: create `ibrews/Pinchwork` + demo repos (README-first), after 3–4 verified.
+
+---
+
 # Progress — make the two travel-test levels distinct PLACES
 
 **Date:** 2026-06-02
