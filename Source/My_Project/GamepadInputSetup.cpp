@@ -59,6 +59,13 @@ static TAutoConsoleVariable<float> CVarGunOffsetRoll(
     TEXT("SpatialAccessory.GunOffsetRoll"), 0.f,
     TEXT("Roll offset for grabbed gun (degrees)"), ECVF_Default);
 
+// Index-thumb pinch grab toggle. Set SpatialAccessory.PinchGrab 0 to disable the
+// C++ pinch-grab (e.g. once IA_IndexThumbPinch is bound to grab in the VRPawn BP).
+static TAutoConsoleVariable<int32> CVarPinchGrab(
+    TEXT("SpatialAccessory.PinchGrab"), 1,
+    TEXT("1 = index-thumb pinch grabs/releases the nearest GrabComponent actor (hand tracking)"),
+    ECVF_Default);
+
 // Debug logging — writes to UE_LOG only (HUD display disabled).
 static void ScreenMsg(const FString &M) {
   UE_LOG(LogTemp, Warning, TEXT("[GamepadSetup] %s"), *M);
@@ -78,8 +85,13 @@ void UGamepadInputSetup::Initialize(FSubsystemCollectionBase &Collection) {
   bL2DirectFired = false;
   bLoggedFuncsR  = false;
   bLoggedFuncsL  = false;
+  bPinchHeldRight = false;
+  bPinchHeldLeft  = false;
 
   ScreenMsg(TEXT("=== SUBSYSTEM INITIALIZED ==="));
+
+  // Keep shared level assets resident across OpenLevel (no texture pop-in on travel).
+  PreloadPersistentAssets();
 
   if (UWorld *W = GetGameInstance()->GetWorld()) {
     FTimerHandle T;
@@ -104,6 +116,45 @@ bool UGamepadInputSetup::IsGrabbableActor(AActor *A) {
     if (C && C->GetClass()->GetName().Contains(TEXT("Grab")))
       return true;
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Both travel levels (VRTemplateMap / TravelTestMap) share these materials/meshes.
+// As a GameInstance subsystem we outlive OpenLevel, so holding hard references here
+// keeps them (and the textures they reference) resident in RAM across a level swap —
+// the new map finds them already loaded instead of unloading+reloading (the ~1s
+// texture pop-in that broke immersion on travel).
+void UGamepadInputSetup::PreloadPersistentAssets() {
+  static const TCHAR *const Paths[] = {
+      TEXT("/Game/VRTemplate/Materials/M_TriPlanar"),
+      TEXT("/Game/VRTemplate/Materials/MI_WA_TechPanel"),
+      TEXT("/Game/VRTemplate/Materials/MI_WA_Steel"),
+      TEXT("/Game/VRTemplate/Materials/MI_WA_Sandstone"),
+      TEXT("/Game/VRTemplate/Materials/MI_WA_CutStone"),
+      TEXT("/Game/VRTemplate/Materials/MI_Grid_Default"),
+      TEXT("/Game/VRTemplate/Materials/MI_Grid_Accent"),
+      TEXT("/Game/StarterContent/Materials/M_Wood_Walnut"),
+      TEXT("/Game/StarterContent/Materials/M_Metal_Chrome"),
+      TEXT("/Game/StarterContent/Materials/M_Metal_Brushed_Nickel"),
+      TEXT("/Game/StarterContent/Materials/M_Rock_Marble_Polished"),
+      TEXT("/Game/StarterContent/Props/SM_Statue"),
+      TEXT("/Game/StarterContent/Props/SM_Rock"),
+      TEXT("/Game/StarterContent/Props/SM_Bush"),
+      TEXT("/Game/StarterContent/Props/SM_TableRound"),
+      TEXT("/Game/StarterContent/Props/SM_Chair"),
+      TEXT("/Game/StarterContent/Architecture/Pillar_50x500"),
+      TEXT("/Engine/VREditor/BasicMeshes/MI_Cube_01"),
+      TEXT("/Engine/VREditor/BasicMeshes/MI_Ball_01"),
+  };
+  int32 Loaded = 0;
+  for (const TCHAR *P : Paths) {
+    if (UObject *Obj = StaticLoadObject(UObject::StaticClass(), nullptr, P)) {
+      KeepAliveAssets.Add(Obj);
+      ++Loaded;
+    }
+  }
+  ScreenMsg(FString::Printf(TEXT("KeepAlive: %d/%d shared assets resident across travel"),
+                            Loaded, (int32)UE_ARRAY_COUNT(Paths)));
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +330,39 @@ void UGamepadInputSetup::ReleaseGrab(bool bRight, APawn *Pawn) {
 }
 
 // ---------------------------------------------------------------------------
+// Hand-tracking pinch → grab. Hold-to-grab: grab the nearest GrabComponent actor
+// on pinch start, drop it on pinch release. Mirrors the R1/L1 grip grab but with
+// hold (not toggle) semantics, so the pinch behaves like a natural pick-up.
+void UGamepadInputSetup::SetHandTrigger(bool bRight, bool bPressed) {
+  if (bRight) bHandTriggerRight = bPressed;
+  else        bHandTriggerLeft  = bPressed;
+}
+
+void UGamepadInputSetup::HandlePinchGrab(bool bRight, bool bPressed) {
+  if (CVarPinchGrab.GetValueOnGameThread() == 0) return;
+
+  UWorld *W = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
+  if (!W) return;
+  APlayerController *PC = UGameplayStatics::GetPlayerController(W, 0);
+  if (!PC) return;
+  APawn *Pawn = PC->GetPawn();
+  if (!Pawn) return;
+
+  bool   &PinchHeld = bRight ? bPinchHeldRight : bPinchHeldLeft;
+  AActor *&Slot     = bRight ? HeldActorRight  : HeldActorLeft;
+
+  if (bPressed) {
+    if (PinchHeld) return;               // already grabbing for this pinch
+    PinchHeld = true;
+    if (!Slot) TryGrab(bRight, PC, Pawn); // grab nearest (Slot empty → never toggles a release)
+  } else {
+    if (!PinchHeld) return;
+    PinchHeld = false;
+    if (Slot) ReleaseGrab(bRight, Pawn);  // drop on release
+  }
+}
+
+// ---------------------------------------------------------------------------
 bool UGamepadInputSetup::Tick(float DeltaTime) {
   UWorld *World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
   if (!World) return true;
@@ -381,8 +465,10 @@ bool UGamepadInputSetup::Tick(float DeltaTime) {
       if (CachedIA_SR.IsValid()) ScreenMsg(TEXT("Cached IA_Shoot_Right"));
     }
 
-    bool bR2Active = R2 > FireDZ;
-    bool bL2Active = L2 > FireDZ;
+    // OR in the hand-gesture trigger (middle-finger curl), so a curl fires the hand-grabbed pistol
+    // through the exact same EnableInput + InjectInputForAction path as the gamepad trigger.
+    bool bR2Active = (R2 > FireDZ) || bHandTriggerRight;
+    bool bL2Active = (L2 > FireDZ) || bHandTriggerLeft;
 
     // Step 1: Set EnableInput state based on which triggers are active.
     // EnableInput/DisableInput are idempotent (push if absent / pop if present).

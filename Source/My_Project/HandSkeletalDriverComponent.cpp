@@ -130,6 +130,11 @@ UHandSkeletalDriverComponent::UHandSkeletalDriverComponent()
 	static ConstructorHelpers::FObjectFinderOptional<UMaterialInterface> DebugMatFinder(
 		TEXT("/Engine/EngineDebugMaterials/WireframeMaterial.WireframeMaterial"));
 	DebugMaterialOverride = DebugMatFinder.Get();
+
+	// Walnut skin for the hands in the wooded level (CDO ref → always cooked).
+	static ConstructorHelpers::FObjectFinderOptional<UMaterialInterface> WalnutFinder(
+		TEXT("/Game/StarterContent/Materials/M_Wood_Walnut.M_Wood_Walnut"));
+	WoodedLevelHandMaterial = WalnutFinder.Get();
 }
 
 void UHandSkeletalDriverComponent::BeginPlay()
@@ -146,6 +151,27 @@ void UHandSkeletalDriverComponent::BeginPlay()
 int32 UHandSkeletalDriverComponent::NumTestStrategies()
 {
 	return 6;
+}
+
+void UHandSkeletalDriverComponent::SetHandMeshHidden(bool bHidden)
+{
+	bForceHidden = bHidden;
+	for (UPoseableMeshComponent* P : Poseables)
+	{
+		if (P) { P->SetVisibility(!bHidden); }
+	}
+}
+
+bool UHandSkeletalDriverComponent::IsWoodedLevel() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+	FString MapName = World->GetMapName();
+	MapName.RemoveFromStart(World->StreamingLevelsPrefix);
+	return MapName.Equals(WoodedLevelName, ESearchCase::IgnoreCase);
 }
 
 EBoneRotationStrategy UHandSkeletalDriverComponent::GetStrategyForGhost(int32 GhostIndex)
@@ -395,6 +421,15 @@ void UHandSkeletalDriverComponent::EnsurePoseablesInitialized()
 				P->SetMaterial(SlotIdx, DebugMaterialOverride);
 			}
 		}
+		// Wooded level (Stone Courtyard): skin the hands in walnut wood.
+		else if (bSwapHandMaterialInWoodedLevel && WoodedLevelHandMaterial && IsWoodedLevel())
+		{
+			const int32 NumMats = P->GetNumMaterials();
+			for (int32 SlotIdx = 0; SlotIdx < NumMats; ++SlotIdx)
+			{
+				P->SetMaterial(SlotIdx, WoodedLevelHandMaterial);
+			}
+		}
 		P->RegisterComponent();
 		P->SetVisibility(true);
 		Poseables.Add(P);
@@ -463,6 +498,17 @@ void UHandSkeletalDriverComponent::TickComponent(float DeltaTime, ELevelTick Tic
 			{
 				if (P) { P->SetVisibility(false); }
 			}
+		}
+		return;
+	}
+
+	// Hidden while this hand is grabbing (set via SetHandMeshHidden) — keep the mesh
+	// hidden and skip driving the pose until release.
+	if (bForceHidden)
+	{
+		for (UPoseableMeshComponent* P : Poseables)
+		{
+			if (P) { P->SetVisibility(false); }
 		}
 		return;
 	}

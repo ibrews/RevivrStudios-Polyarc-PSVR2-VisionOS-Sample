@@ -115,6 +115,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver")
 	bool bHideWhenUntracked = true;
 
+	// In the "wooded" level (Stone Courtyard / TravelTestMap), skin the hand mesh
+	// in walnut wood instead of its default material. Applied at BeginPlay.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver")
+	bool bSwapHandMaterialInWoodedLevel = true;
+
+	// Material used for the wooded-level hand skin. Defaults to StarterContent
+	// M_Wood_Walnut (loaded in the constructor).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver")
+	TObjectPtr<UMaterialInterface> WoodedLevelHandMaterial = nullptr;
+
+	// Short map name that counts as the "wooded" level for the walnut hand skin.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver")
+	FString WoodedLevelName = TEXT("TravelTestMap");
+
 	// Manny-XR's wrist bone is rotated 90° around its bone-along axis relative
 	// to the OpenXR wrist convention (verified empirically in v23 by cycling
 	// six 90° candidates; Roll +90 was the unambiguous winner — the wrist's
@@ -203,11 +217,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver|Test", meta = (ClampMin = "0.5", ClampMax = "20.0"))
 	float MultiStrategyCycleSec = 2.5f;
 
+	// Hide/show this hand's mesh (called by the hand-tracking component so the hand
+	// disappears while it's grabbing an object). Sticks across ticks.
+	void SetHandMeshHidden(bool bHidden);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
+	// True while this hand is grabbing (set via SetHandMeshHidden) — the mesh stays
+	// hidden and the pose isn't driven until release.
+	bool bForceHidden = false;
+
 	// In normal mode this array holds one Poseable. In multi-strategy test
 	// mode it holds one per strategy (6) — driven independently per Tick.
 	UPROPERTY()
@@ -221,6 +243,7 @@ private:
 
 	void EnsurePoseablesInitialized();
 	void HidePsvr2ControllerHands();
+	bool IsWoodedLevel() const;
 	FName ResolveBoneName(EHandKeypoint Keypoint) const;
 	EHandKeypoint NextKeypointInChain(EHandKeypoint Keypoint) const;
 
