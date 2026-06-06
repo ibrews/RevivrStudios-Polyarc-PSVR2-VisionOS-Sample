@@ -16,6 +16,10 @@
 
 class UInstancedStaticMeshComponent;
 class UStaticMesh;
+class UInputAction;
+class USoundBase;
+class UTextRenderComponent;
+class UHandSkeletalDriverComponent;
 
 UENUM(BlueprintType)
 enum class EHandTrackingSide : uint8
@@ -347,6 +351,41 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Test")
 	bool bShowLevelLabel = true;
 
+	// --- Scene-load sound (fired once at BeginPlay by the left-hand instance) ---
+
+	// Play a one-shot sound the moment the level begins (distinct per level).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Audio")
+	bool bPlaySceneLoadSound = true;
+
+	// Played at BeginPlay in Level A (the default map). If null, a StarterContent
+	// default is loaded by path.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Audio")
+	TObjectPtr<USoundBase> SceneLoadSoundLevelA = nullptr;
+
+	// Played at BeginPlay in Level B. If null, a StarterContent default is loaded.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Audio")
+	TObjectPtr<USoundBase> SceneLoadSoundLevelB = nullptr;
+
+	// --- Gesture → Enhanced Input ---
+
+	// Inject recognized gestures as Enhanced Input actions each frame they're
+	// active, so the VRPawn grab (and any other binding) can consume e.g.
+	// IA_IndexThumbPinch alongside the grip inputs. The per-hand action assets
+	// live at /Game/VRTemplate/Input/Actions/Hands/IA_<Gesture>_<Side>.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Input")
+	bool bInjectGestureInputActions = true;
+
+	// --- Pinch grab ---
+
+	// Radius (cm) around the thumb-index pinch point searched for a grabbable
+	// (any actor with a GrabComponent) when the index pinch starts.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Grab", meta = (ClampMin = "2.0", ClampMax = "60.0"))
+	float GrabRadiusCm = 15.0f;
+
+	// Multiplier on the hand's release velocity when a held object is thrown.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Grab", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+	float ThrowVelocityScale = 1.5f;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -355,11 +394,49 @@ private:
 	UPROPERTY()
 	TObjectPtr<UInstancedStaticMeshComponent> JointInstances = nullptr;
 
+	// Opaque world-space "LEVEL A/B" banner (replaces DrawDebugString, which
+	// composites poorly over passthrough/mixed reality). Left instance only.
+	UPROPERTY()
+	TObjectPtr<UTextRenderComponent> LevelLabelText = nullptr;
+
+	// --- Pinch-grab state ---
+	// The held object rides PinchAnchor, which is kept on the thumb-index pinch
+	// point every tick; on release the object is thrown with the hand velocity.
+	UPROPERTY()
+	TObjectPtr<USceneComponent> PinchAnchor = nullptr;
+	UPROPERTY()
+	TObjectPtr<AActor> HeldActor = nullptr;
+	FVector CurrentPinchMidpoint = FVector::ZeroVector;
+	// Hand orientation (Palm keypoint) — drives the anchor's rotation so a held
+	// object rotates with the hand, like a motion-controller grip pose.
+	FQuat CurrentPinchRotation = FQuat::Identity;
+	FVector HeldPinchLocation = FVector::ZeroVector;
+	FVector HeldPinchVelocity = FVector::ZeroVector;
+	// Cached sibling hand-mesh driver (same hand) — hidden while grabbing.
+	UPROPERTY()
+	TObjectPtr<UHandSkeletalDriverComponent> HandMeshDriver = nullptr;
+
 	// Resolved once in the constructor — ConstructorHelpers::FObjectFinder is
 	// the only context where it is legal to call. Holding a strong reference
 	// here keeps the lookup off the runtime hot path.
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> DefaultJointMesh = nullptr;
+
+	// Per-hand gesture Input Actions, hard-referenced from the constructor (CDO) so
+	// they are always cooked, then injected via Enhanced Input while the matching
+	// gesture is active. InjectGestureActions picks the variant from bIsRight.
+	UPROPERTY()
+	TObjectPtr<UInputAction> IndexThumbPinchActionLeft = nullptr;
+	UPROPERTY()
+	TObjectPtr<UInputAction> IndexThumbPinchActionRight = nullptr;
+	UPROPERTY()
+	TObjectPtr<UInputAction> MiddlePinchActionLeft = nullptr;
+	UPROPERTY()
+	TObjectPtr<UInputAction> MiddlePinchActionRight = nullptr;
+	UPROPERTY()
+	TObjectPtr<UInputAction> PinkyPinchActionLeft = nullptr;
+	UPROPERTY()
+	TObjectPtr<UInputAction> PinkyPinchActionRight = nullptr;
 
 
 	bool bIsTracking = false;
@@ -373,6 +450,26 @@ private:
 	void UpdatePinchState(const FTransform& ThumbTipWorld, const FTransform& IndexTipWorld);
 	void UpdateMiddlePinchState(const FTransform& ThumbTipWorld, const FTransform& MiddleTipWorld);
 	void UpdatePinkyPinchState(const FTransform& ThumbTipWorld, const FTransform& PinkyTipWorld);
+	// Ring-thumb pinch on the FREE hand steps the held-gun grip orientation (r.Gun.OrientIndex, 0..23)
+	// live, with the index shown on the HUD — lets us find the correct muzzle-forward/upright pose
+	// on-device without a rebuild per guess. (The holding hand can't ring-pinch: its thumb grips the gun.)
+	void UpdateRingPinchState(const FTransform& ThumbTipWorld, const FTransform& RingTipWorld);
+	bool bIsRingPinching = false;
+	// Latched gun-fire state (middle-curl). Occlusion-coast: a clear curl starts it, a confident open
+	// stops it, an occluded/ambiguous tip HOLDS it (a curled firing finger often hides its own tip).
+	bool bIsGunFiring = false;
+	// Game-time this hand last grabbed something — used to suppress a fire for ~0.3s after grab so the
+	// gun doesn't discharge the instant it's picked up.
+	double GunGrabTimeSeconds = -1000.0;
+	// Game-time of the last auto-fire shot while the trigger is held (1 shot / r.Gun.AutoFireInterval).
+	double LastGunShotTime = -1000.0;
+
+	// Superman-fly feedback FX (created on the right-hand instance, attached to the pawn): a soft looping
+	// wind sound + ambient dust whizzing by, as a vection cue to reduce motion sickness while flying.
+	UPROPERTY(Transient) class UAudioComponent* FlySoundComp = nullptr;
+	UPROPERTY(Transient) class UParticleSystemComponent* FlyParticleComp = nullptr;
+	void EnsureFlyFX(class APawn* Pawn);
+	void SetFlyFXActive(bool bActive);
 	void SpawnExplosion(const FVector& WorldLocation);
 
 	// Gesture detection
@@ -387,6 +484,16 @@ private:
 	void UpdateGestureState(float DeltaTime);
 	void SpawnGestureVisual(EHandGesture Gesture, const FTransform& PalmTransform);
 	void SpawnTransientSphere(const FVector& WorldLocation, float RadiusCm, float DurationSec);
+
+	// Scene-load sound + gesture→input-action injection + pinch-grab bridge.
+	void PlaySceneLoadSound();
+	void InjectGestureActions();
+	void NotifyPinchGrab(bool bPressed);
+	void EnsurePinchAnchor();
+	void TryPinchGrab(const FVector& PinchLocation);
+	void ReleasePinchGrab();
+	void UpdateHeldActorFollow(const FVector& PinchLocation, float DeltaTime);
+	void SetHeldHandMeshHidden(bool bHidden);
 
 	// Label management
 	void EnsureLabelInitialized();
@@ -417,5 +524,5 @@ private:
 	// True when the current map is Level B (TravelTestMap).
 	bool IsInLevelB() const;
 	// Draw the big "LEVEL A/B" banner in front of the player (left instance only).
-	void DrawLevelLabel() const;
+	void DrawLevelLabel();
 };

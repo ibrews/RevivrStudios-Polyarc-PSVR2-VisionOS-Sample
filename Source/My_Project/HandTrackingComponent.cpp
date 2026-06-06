@@ -2,19 +2,129 @@
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/OverlapResult.h"
+#include "Materials/MaterialInterface.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"            // GEngine->AddOnScreenDebugMessage (debug depth-cycle feedback)
+#include "HAL/IConsoleManager.h"      // runtime CVar set for the depth-fix test cycle
+#include "Math/RotationMatrix.h"      // FRotationMatrix::MakeFromXZ for the gun-orientation cycler
+#include "Components/AudioComponent.h"        // Superman-fly wind sound
+#include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"                  // bLooping for the wind loop
+#include "Particles/ParticleSystem.h"        // Superman-fly ambient dust
+#include "Particles/ParticleSystemComponent.h"
 #include "Features/IModularFeatures.h"
 #include "HeadMountedDisplayTypes.h"
 #include "IHandTracker.h"
 #include "Camera/PlayerCameraManager.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/PackageName.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputAction.h"
+#include "InputActionValue.h"
+#include "Sound/SoundBase.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
+#include "GamepadInputSetup.h"
+#include "HandSkeletalDriverComponent.h"
+
+// --- Gun: middle-curl fire trigger + grip offset (tunable; dial on-device, then bake into the gun BP) ---
+static TAutoConsoleVariable<float> CVarGunTriggerCurl(
+	TEXT("r.Gun.TriggerCurlRatio"), 0.72f,
+	TEXT("While holding a gun, fire when the MIDDLE finger's extension ratio drops BELOW this "
+	     "(1.0 = straight, lower = curled). Non-thumb gesture so it coexists with the index-thumb grip."),
+	ECVF_Default);
+static TAutoConsoleVariable<float> CVarGunGripX(TEXT("r.Gun.GripOffsetX"), 0.0f, TEXT("Held-gun grip offset X (cm, relative to the pinch point)"), ECVF_Default);
+static TAutoConsoleVariable<float> CVarGunGripY(TEXT("r.Gun.GripOffsetY"), 0.0f, TEXT("Held-gun grip offset Y (cm)"), ECVF_Default);
+static TAutoConsoleVariable<float> CVarGunGripZ(TEXT("r.Gun.GripOffsetZ"), 0.0f, TEXT("Held-gun grip offset Z (cm)"), ECVF_Default);
+static TAutoConsoleVariable<float> CVarGunGripPitch(TEXT("r.Gun.GripPitch"), 0.0f, TEXT("Held-gun grip relative pitch (deg)"), ECVF_Default);
+static TAutoConsoleVariable<float> CVarGunGripYaw(TEXT("r.Gun.GripYaw"), 180.0f, TEXT("Held-gun grip relative yaw (deg). 180 = flip so the muzzle points away from the user, not at them."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarGunGripRoll(TEXT("r.Gun.GripRoll"), -90.0f, TEXT("Held-gun grip relative roll (deg). -90 = stand the pistol upright (yaw 180 tipped it onto its side; +90 tipped it the wrong way)."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarGunTriggerHyst(TEXT("r.Gun.TriggerCurlHysteresis"), 0.12f, TEXT("Release margin above the fire curl ratio (debounce, so firing doesn't flicker at the threshold)."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarGunAutoFireInterval(TEXT("r.Gun.AutoFireInterval"), 1.0f, TEXT("While the trigger (middle curl) is held, auto-fire one shot every this many seconds (first shot immediate)."), ECVF_Default);
+
+// @AGILELENS - on-device A/B for the visionOS translucent-depth-fixup (glass over passthrough). The AVP
+// has no in-app console, so a ring-thumb pinch on a FREE hand (no gun held) cycles the depth-fixup CVars
+// at runtime. GHeldGrabCount gates the dual-purpose ring-pinch: hold a gun -> tune grip orient (below);
+// hold nothing -> cycle the depth fix. See ~/knowledge/projects/pinchwork/translucency-depth-fix.md.
+static int32 GHeldGrabCount = 0;             // # actors grabbed across both hands (0 => hands free)
+static int32 GTranslucentDepthTestIndex = 0; // current slot in the depth-fixup A/B cycle
+
+// Held-gun grip ORIENTATION as an index into the 24 axis-aligned orientations, instead of guessing
+// Euler angles for the mesh's unknown native axes. A ring-thumb pinch on the FREE hand steps it (the
+// holding hand's thumb is busy with the index-thumb grip), the gun snaps to it live, and the index is
+// shown on the HUD — spin until the muzzle points forward + the pistol is upright, read the number,
+// then bake it as this default. <0 = fall back to the GripPitch/Yaw/Roll Euler CVars above.
+// Held-gun grip orientation is HAND-DEPENDENT: the pinch anchor rides each hand's pinch pose, which is
+// MIRRORED between left and right, so the same gun mesh needs a different axis-aligned orientation to
+// point muzzle-forward + upright in each hand. Baked on-device by cycling (ring-thumb pinch on the FREE
+// hand steps the HELD hand's index): right=21, left=16. <0 on either = fall back to the Euler CVars.
+static TAutoConsoleVariable<int32> CVarGunOrientRight(
+	TEXT("r.Gun.OrientIndexRight"), 21,
+	TEXT("Held-gun grip orientation for the RIGHT hand (0..23 axis-aligned). <0 = use the Euler CVars."),
+	ECVF_Default);
+static TAutoConsoleVariable<int32> CVarGunOrientLeft(
+	TEXT("r.Gun.OrientIndexLeft"), 16,
+	TEXT("Held-gun grip orientation for the LEFT hand (0..23, mirror of the right). <0 = use Euler CVars."),
+	ECVF_Default);
+
+// The Nth of the 24 proper axis-aligned orientations: local +X -> one of ±X/±Y/±Z, local +Z -> a
+// perpendicular axis. Cycling all 24 is guaranteed to hit muzzle-forward + upright for ANY native mesh
+// axes, so we never have to solve the Euler composition by hand.
+static FRotator GunGripRotationFromIndex(int32 Idx)
+{
+	static const FVector Ax[6] = {
+		FVector(1, 0, 0), FVector(-1, 0, 0), FVector(0, 1, 0),
+		FVector(0, -1, 0), FVector(0, 0, 1), FVector(0, 0, -1) };
+	const int32 FwdAxis = ((Idx / 4) % 6 + 6) % 6;
+	const FVector F = Ax[FwdAxis];
+	FVector Ups[4];
+	int32 n = 0;
+	for (int32 k = 0; k < 6 && n < 4; ++k)
+	{
+		if (FMath::Abs(FVector::DotProduct(Ax[k], F)) < 0.5f) { Ups[n++] = Ax[k]; }
+	}
+	const FVector U = Ups[((Idx % 4) + 4) % 4];
+	return FRotationMatrix::MakeFromXZ(F, U).Rotator();
+}
+static constexpr int32 GGunOrientCount = 24;
+
+// Held-gun grip rotation for the given hand: per-hand orientation index if >= 0, else the Euler CVars.
+static FRotator CurrentGunGripRotation(bool bIsRight)
+{
+	const int32 Idx = bIsRight
+		? CVarGunOrientRight.GetValueOnGameThread()
+		: CVarGunOrientLeft.GetValueOnGameThread();
+	if (Idx >= 0)
+	{
+		return GunGripRotationFromIndex(Idx);
+	}
+	return FRotator(CVarGunGripPitch.GetValueOnGameThread(),
+		CVarGunGripYaw.GetValueOnGameThread(), CVarGunGripRoll.GetValueOnGameThread());
+}
+
+// Throttle accumulators for the continuous [GunTune] middle-ratio log (index 0 = right, 1 = left).
+static float GGunTuneLogAccum[2] = { 0.0f, 0.0f };
+
+// --- Superman two-fist fly locomotion ---
+static TAutoConsoleVariable<int32> CVarFlyEnable(TEXT("r.Fly.Enable"), 1, TEXT("1 = two-fist (Superman) fly: both hands fisted -> drift along the average fist direction."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarFlySpeed(TEXT("r.Fly.Speed"), 80.0f, TEXT("Superman fly speed in cm/s (very slow by default)."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarFlyCoast(TEXT("r.Fly.CoastSec"), 0.3f, TEXT("Keep flying for this long after a fist briefly drops (debounces gesture/tracking flicker). The fist times out after this, so flight can't 'keep going' once you open your hands."), ECVF_Default);
+// Shared across both per-hand components: the last game-time each hand showed a valid fist (timestamps,
+// so a stale value can't latch — it just expires after the coast window).
+static double  GFlyLeftFistTime  = -1000.0;
+static double  GFlyRightFistTime = -1000.0;
+static FVector GFlyLeftDir   = FVector::ZeroVector;
+static FVector GFlyRightDir  = FVector::ZeroVector;
 
 namespace
 {
@@ -131,6 +241,22 @@ UHandTrackingComponent::UHandTrackingComponent()
 	// engine sphere mesh for use at BeginPlay.
 	static ConstructorHelpers::FObjectFinderOptional<UStaticMesh> EngineSphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	DefaultJointMesh = EngineSphereFinder.Get();
+
+	// Hard-reference the per-hand gesture Input Actions from the CDO so they are
+	// always cooked — StaticLoadObject / string paths are NOT cook references, so
+	// without this the assets wouldn't be packaged and the injection would no-op.
+	static ConstructorHelpers::FObjectFinderOptional<UInputAction> IdxL(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_IndexThumbPinch_Left.IA_IndexThumbPinch_Left"));
+	static ConstructorHelpers::FObjectFinderOptional<UInputAction> IdxR(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_IndexThumbPinch_Right.IA_IndexThumbPinch_Right"));
+	static ConstructorHelpers::FObjectFinderOptional<UInputAction> MidL(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_MiddleThumbPinch_Left.IA_MiddleThumbPinch_Left"));
+	static ConstructorHelpers::FObjectFinderOptional<UInputAction> MidR(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_MiddleThumbPinch_Right.IA_MiddleThumbPinch_Right"));
+	static ConstructorHelpers::FObjectFinderOptional<UInputAction> PnkL(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_PinkyThumbPinch_Left.IA_PinkyThumbPinch_Left"));
+	static ConstructorHelpers::FObjectFinderOptional<UInputAction> PnkR(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_PinkyThumbPinch_Right.IA_PinkyThumbPinch_Right"));
+	IndexThumbPinchActionLeft  = IdxL.Get();
+	IndexThumbPinchActionRight = IdxR.Get();
+	MiddlePinchActionLeft      = MidL.Get();
+	MiddlePinchActionRight     = MidR.Get();
+	PinkyPinchActionLeft       = PnkL.Get();
+	PinkyPinchActionRight      = PnkR.Get();
 }
 
 void UHandTrackingComponent::BeginPlay()
@@ -143,6 +269,11 @@ void UHandTrackingComponent::BeginPlay()
 		StartCalibration();
 	}
 
+	// Scene-load sting — left instance only so it fires exactly once per level load.
+	if (!bIsRight && bPlaySceneLoadSound)
+	{
+		PlaySceneLoadSound();
+	}
 }
 
 void UHandTrackingComponent::EnsureInstancesInitialized()
@@ -192,6 +323,320 @@ EControllerHand UHandTrackingComponent::ResolveControllerHand() const
 	return bIsRight ? EControllerHand::Right : EControllerHand::Left;
 }
 
+void UHandTrackingComponent::PlaySceneLoadSound()
+{
+	USoundBase* Sound = IsInLevelB() ? SceneLoadSoundLevelB : SceneLoadSoundLevelA;
+	if (!Sound)
+	{
+		// StarterContent defaults: Level A (Cobalt Lab) = an electrical "power-on";
+		// Level B (Stone Courtyard) = birdsong. Both are one-shot SoundWaves.
+		const TCHAR* Path = IsInLevelB()
+			? TEXT("/Game/StarterContent/Audio/Starter_Birds01.Starter_Birds01")
+			: TEXT("/Game/StarterContent/Audio/Light01.Light01");
+		Sound = Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr, Path));
+	}
+	if (Sound)
+	{
+		UGameplayStatics::PlaySound2D(this, Sound);
+	}
+}
+
+void UHandTrackingComponent::InjectGestureActions()
+{
+	if (!bInjectGestureInputActions)
+	{
+		return;
+	}
+	const UWorld* World = GetWorld();
+	APlayerController* PC = World ? UGameplayStatics::GetPlayerController(World, 0) : nullptr;
+	ULocalPlayer* LP = PC ? PC->GetLocalPlayer() : nullptr;
+	UEnhancedInputLocalPlayerSubsystem* EI =
+		LP ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LP) : nullptr;
+	if (!EI)
+	{
+		return;
+	}
+	// Injecting each frame the gesture is active keeps the action "triggered";
+	// when the gesture ends, injection stops and the action completes — giving a
+	// clean hold/release that any binding (e.g. the VRPawn grab) can consume.
+	auto Inject = [EI](UInputAction* IA, bool bActive)
+	{
+		if (IA && bActive)
+		{
+			EI->InjectInputForAction(IA, FInputActionValue(true), {}, {});
+		}
+	};
+	Inject(bIsRight ? IndexThumbPinchActionRight : IndexThumbPinchActionLeft, bIsPinching);
+	Inject(bIsRight ? MiddlePinchActionRight : MiddlePinchActionLeft, bIsMiddlePinching);
+	Inject(bIsRight ? PinkyPinchActionRight : PinkyPinchActionLeft, bIsPinkyPinching);
+}
+
+namespace
+{
+	bool ActorHasGrabComponent(AActor* Actor)
+	{
+		if (!Actor) { return false; }
+		for (UActorComponent* C : Actor->GetComponents())
+		{
+			if (C && C->GetClass()->GetName().Contains(TEXT("Grab")))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
+void UHandTrackingComponent::EnsurePinchAnchor()
+{
+	if (PinchAnchor)
+	{
+		return;
+	}
+	PinchAnchor = NewObject<USceneComponent>(GetOwner());
+	PinchAnchor->SetupAttachment(this);
+	PinchAnchor->RegisterComponent();
+}
+
+void UHandTrackingComponent::NotifyPinchGrab(bool bPressed)
+{
+	// Index-thumb pinch grab. On pinch: grab the nearest actor with a GrabComponent
+	// AT THE PINCH POINT (thumb-index midpoint), not the wrist. On release: throw it
+	// with the hand's velocity. The held object rides PinchAnchor (kept on the pinch
+	// point each Tick by UpdateHeldActorFollow).
+	if (bPressed)
+	{
+		TryPinchGrab(CurrentPinchMidpoint);
+	}
+	else
+	{
+		ReleasePinchGrab();
+	}
+}
+
+void UHandTrackingComponent::TryPinchGrab(const FVector& PinchLocation)
+{
+	if (HeldActor)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	EnsurePinchAnchor();
+
+	TArray<FOverlapResult> Hits;
+	FCollisionQueryParams Params(TEXT("HandPinchGrab"), false);
+	Params.AddIgnoredActor(GetOwner());
+	World->OverlapMultiByObjectType(Hits, PinchLocation, FQuat::Identity,
+		FCollisionObjectQueryParams(FCollisionObjectQueryParams::AllDynamicObjects),
+		FCollisionShape::MakeSphere(GrabRadiusCm), Params);
+
+	AActor* Best = nullptr;
+	float BestDistSq = FLT_MAX;
+	for (const FOverlapResult& Hit : Hits)
+	{
+		AActor* Candidate = Hit.GetActor();
+		if (!Candidate || !ActorHasGrabComponent(Candidate))
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared(Candidate->GetActorLocation(), PinchLocation);
+		if (DistSq < BestDistSq)
+		{
+			BestDistSq = DistSq;
+			Best = Candidate;
+		}
+	}
+	if (!Best)
+	{
+		return;
+	}
+
+	// Physics must be disabled before attaching, or the attach is ignored.
+	for (UActorComponent* C : Best->GetComponents())
+	{
+		if (UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(C))
+		{
+			Prim->SetSimulatePhysics(false);
+			Prim->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		}
+	}
+
+	// Anchor at the pinch point WITH the hand's rotation, so the object rides it
+	// like a motion-controller grip pose. Snap location to the pinch point; keep the
+	// object's current world rotation (no jarring re-orient), then it follows the
+	// hand's rotation from there via the rigid attach.
+	PinchAnchor->SetWorldLocationAndRotation(PinchLocation, CurrentPinchRotation);
+	Best->AttachToComponent(PinchAnchor, FAttachmentTransformRules(
+		EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, EAttachmentRule::KeepWorld, false));
+
+	// Grip offset: shift/orient the held object (relative to PinchAnchor) so its HANDLE sits in the
+	// thumb-index "O" instead of its origin. Orientation comes from the per-hand cycler (r.Gun.OrientIndex{Right,Left})
+	// or the legacy Euler CVars; position from r.Gun.GripOffset{X,Y,Z}. Re-applied every tick in
+	// UpdateHeldActorFollow so a ring-pinch can retune it live. Set once here for the first frame.
+	Best->SetActorRelativeRotation(CurrentGunGripRotation(bIsRight));
+	Best->SetActorRelativeLocation(FVector(
+		CVarGunGripX.GetValueOnGameThread(), CVarGunGripY.GetValueOnGameThread(), CVarGunGripZ.GetValueOnGameThread()));
+
+	HeldActor = Best;
+	++GHeldGrabCount;  // @AGILELENS - a grab is active -> free-hand ring-pinch tunes gun orient (not depth)
+	HeldPinchLocation = PinchLocation;
+	HeldPinchVelocity = FVector::ZeroVector;
+	// Stamp the grab so fire is suppressed for ~0.3s (no discharge on pickup); start un-fired.
+	GunGrabTimeSeconds = World->GetTimeSeconds();
+	bIsGunFiring = false;
+	// Hide this hand's mesh while holding so it doesn't clip through the object.
+	SetHeldHandMeshHidden(true);
+}
+
+void UHandTrackingComponent::ReleasePinchGrab()
+{
+	if (!HeldActor)
+	{
+		return;
+	}
+	AActor* Released = HeldActor;
+	HeldActor = nullptr;
+	if (GHeldGrabCount > 0) { --GHeldGrabCount; }  // @AGILELENS - keep the depth-cycle gate in sync
+	// Show this hand's mesh again.
+	SetHeldHandMeshHidden(false);
+
+	Released->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+	const FVector ThrowVelocity = HeldPinchVelocity * ThrowVelocityScale;
+	UPrimitiveComponent* ThrowPrim = nullptr;
+	for (UActorComponent* C : Released->GetComponents())
+	{
+		if (UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(C))
+		{
+			Prim->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+			Prim->SetSimulatePhysics(true);
+			if (!ThrowPrim && Prim->IsSimulatingPhysics())
+			{
+				ThrowPrim = Prim;
+			}
+		}
+	}
+	if (ThrowPrim)
+	{
+		ThrowPrim->SetPhysicsLinearVelocity(ThrowVelocity);
+	}
+}
+
+void UHandTrackingComponent::UpdateHeldActorFollow(const FVector& PinchLocation, float DeltaTime)
+{
+	if (!HeldActor || !PinchAnchor)
+	{
+		return;
+	}
+	const float Dt = FMath::Max(DeltaTime, 1e-4f);
+	const FVector InstantVelocity = (PinchLocation - HeldPinchLocation) / Dt;
+	// Light smoothing so one noisy frame doesn't wreck the throw, but stay snappy.
+	HeldPinchVelocity = FMath::Lerp(HeldPinchVelocity, InstantVelocity, 0.5f);
+	HeldPinchLocation = PinchLocation;
+	// Track both location and hand rotation so the held object rotates naturally.
+	PinchAnchor->SetWorldLocationAndRotation(PinchLocation, CurrentPinchRotation);
+	// Re-apply the grip pose (relative to the anchor) every tick so the held-gun orientation can be
+	// tuned LIVE: a ring-thumb pinch on the free hand steps the held hand's r.Gun.OrientIndex{Right,Left}.
+	HeldActor->SetActorRelativeRotation(CurrentGunGripRotation(bIsRight));
+	HeldActor->SetActorRelativeLocation(FVector(
+		CVarGunGripX.GetValueOnGameThread(), CVarGunGripY.GetValueOnGameThread(), CVarGunGripZ.GetValueOnGameThread()));
+}
+
+void UHandTrackingComponent::SetHeldHandMeshHidden(bool bHidden)
+{
+	if (!HandMeshDriver)
+	{
+		// Find this hand's sibling skeletal-mesh driver (same side) once.
+		if (AActor* Owner = GetOwner())
+		{
+			TArray<UHandSkeletalDriverComponent*> Drivers;
+			Owner->GetComponents<UHandSkeletalDriverComponent>(Drivers);
+			for (UHandSkeletalDriverComponent* Driver : Drivers)
+			{
+				if (Driver && Driver->bIsRight == bIsRight)
+				{
+					HandMeshDriver = Driver;
+					break;
+				}
+			}
+		}
+	}
+	if (HandMeshDriver)
+	{
+		HandMeshDriver->SetHandMeshHidden(bHidden);
+	}
+}
+
+// Lazily create the Superman-fly feedback FX (once), attached to the pawn: a soft looping wind sound and
+// an ambient-dust particle system. Both are StarterContent assets (cooked via DirectoriesToAlwaysCook).
+// Null-safe: if an asset can't be loaded, that FX is simply skipped (no crash).
+void UHandTrackingComponent::EnsureFlyFX(APawn* Pawn)
+{
+	if (!Pawn) { return; }
+	USceneComponent* Root = Pawn->GetRootComponent();
+	if (!Root) { return; }
+
+	if (!FlySoundComp)
+	{
+		if (USoundBase* Wind = Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr,
+			TEXT("/Game/StarterContent/Audio/Starter_Wind06.Starter_Wind06"))))
+		{
+			if (USoundWave* Wave = Cast<USoundWave>(Wind)) { Wave->bLooping = true; }
+			FlySoundComp = NewObject<UAudioComponent>(Pawn);
+			if (FlySoundComp)
+			{
+				FlySoundComp->bAutoActivate = false;
+				FlySoundComp->SetSound(Wind);
+				FlySoundComp->SetVolumeMultiplier(0.0f); // start silent; faded in on activate
+				FlySoundComp->SetupAttachment(Root);
+				FlySoundComp->RegisterComponent();
+			}
+		}
+	}
+
+	if (!FlyParticleComp)
+	{
+		if (UParticleSystem* Dust = Cast<UParticleSystem>(StaticLoadObject(UParticleSystem::StaticClass(), nullptr,
+			TEXT("/Game/StarterContent/Particles/P_Ambient_Dust.P_Ambient_Dust"))))
+		{
+			FlyParticleComp = NewObject<UParticleSystemComponent>(Pawn);
+			if (FlyParticleComp)
+			{
+				FlyParticleComp->bAutoActivate = false;
+				FlyParticleComp->SetTemplate(Dust);
+				FlyParticleComp->SetupAttachment(Root);
+				FlyParticleComp->RegisterComponent();
+			}
+		}
+	}
+}
+
+// Fade the fly sound in/out and activate/deactivate the dust while flying. Soft (low volume) and quick
+// fades so it doesn't pop. Idempotent — safe to call every tick.
+void UHandTrackingComponent::SetFlyFXActive(bool bActive)
+{
+	if (FlySoundComp)
+	{
+		if (bActive)
+		{
+			if (!FlySoundComp->IsPlaying()) { FlySoundComp->FadeIn(0.4f, 0.35f); } // soft target volume
+		}
+		else if (FlySoundComp->IsPlaying())
+		{
+			FlySoundComp->FadeOut(0.4f, 0.0f);
+		}
+	}
+	if (FlyParticleComp)
+	{
+		if (bActive && !FlyParticleComp->IsActive()) { FlyParticleComp->ActivateSystem(); }
+		else if (!bActive && FlyParticleComp->IsActive()) { FlyParticleComp->DeactivateSystem(); }
+	}
+}
+
 void UHandTrackingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -221,6 +666,7 @@ void UHandTrackingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		{
 			bIsPinching = false;
 			OnPinchEnded.Broadcast(GetSide());
+			NotifyPinchGrab(false);
 		}
 		if (bIsMiddlePinching)
 		{
@@ -259,10 +705,12 @@ void UHandTrackingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	FTransform IndexTipWorld = FTransform::Identity;
 	FTransform MiddleTipWorld = FTransform::Identity;
 	FTransform LittleTipWorld = FTransform::Identity;
+	FTransform RingTipWorld = FTransform::Identity;
 	bool bHaveThumbTip = false;
 	bool bHaveIndexTip = false;
 	bool bHaveMiddleTip = false;
 	bool bHaveLittleTip = false;
+	bool bHaveRingTip = false;
 
 	for (int32 i = 0; i < EHandKeypointCount; ++i)
 	{
@@ -311,6 +759,11 @@ void UHandTrackingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 			LittleTipWorld = KeypointTransform;
 			bHaveLittleTip = true;
 		}
+		else if (Keypoint == EHandKeypoint::RingTip)
+		{
+			RingTipWorld = KeypointTransform;
+			bHaveRingTip = true;
+		}
 	}
 
 	if (JointInstances && bShowJointMarkers)
@@ -320,6 +773,15 @@ void UHandTrackingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
 	if (bHaveThumbTip && bHaveIndexTip)
 	{
+		CurrentPinchMidpoint = (ThumbTipWorld.GetLocation() + IndexTipWorld.GetLocation()) * 0.5f;
+		// Hand orientation from the Palm keypoint, so a held object rotates with the
+		// hand (the anchor acts like a motion-controller grip pose). Keep the last
+		// good rotation if the palm isn't tracked this frame.
+		const FTransform PalmXform = GetKeypointWorldTransform(EHandKeypoint::Palm);
+		if (!PalmXform.GetLocation().IsNearlyZero())
+		{
+			CurrentPinchRotation = PalmXform.GetRotation();
+		}
 		UpdatePinchState(ThumbTipWorld, IndexTipWorld);
 	}
 	if (bHaveThumbTip && bHaveMiddleTip)
@@ -329,6 +791,101 @@ void UHandTrackingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	if (bHaveThumbTip && bHaveLittleTip)
 	{
 		UpdatePinkyPinchState(ThumbTipWorld, LittleTipWorld);
+	}
+	if (bHaveThumbTip && bHaveRingTip)
+	{
+		UpdateRingPinchState(ThumbTipWorld, RingTipWorld);
+	}
+	// While a pinch-grabbed object is held, keep it on the pinch point and track
+	// the hand's velocity (used for the throw on release).
+	if (HeldActor)
+	{
+		UpdateHeldActorFollow(CurrentPinchMidpoint, DeltaTime);
+	}
+
+	// Gun trigger: while holding a gun, a MIDDLE-finger curl fires it. The middle finger is free (the gun
+	// is held by the index-thumb pinch), so this coexists with the grip. OCCLUSION-COAST: curling the
+	// firing finger frequently hides its own tip from the cameras, so the tip reads ratio 0 ("untracked")
+	// at exactly the moment you mean to fire. We must NOT treat that as "stop". So: a CLEAR curl starts
+	// firing, a CONFIDENT open stops it, and an occluded/ambiguous reading HOLDS the current state — the
+	// same robust pattern as the fly quick-stop. (Earlier a `ratio > 0.05` floor killed firing entirely
+	// because the strong-curl/occluded case it was meant to reject is the firing case.) Fires the
+	// HAND-held actor directly (EnableInput + inject IA_Shoot_Right, same as the gamepad R2 path).
+	{
+		const float MiddleRatio = ComputeFingerExtensionRatio(EHandKeypoint::MiddleTip);
+		const float CurlEnter = CVarGunTriggerCurl.GetValueOnGameThread();           // curl below -> fire
+		const float CurlExit  = CurlEnter + CVarGunTriggerHyst.GetValueOnGameThread(); // extend above -> stop
+		const bool  bValid     = MiddleRatio > 0.02f;          // 0 == untracked/occluded -> coast, don't drop
+		const bool  bClearCurl     = bValid && MiddleRatio < CurlEnter;
+		const bool  bConfidentOpen = bValid && MiddleRatio > CurlExit;
+		const double NowSec = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+		const bool  bGrabSettled = (NowSec - GunGrabTimeSeconds) > 0.3;  // no discharge for 0.3s after grab
+
+		if (!HeldActor)
+		{
+			bIsGunFiring = false;
+		}
+		else if (bClearCurl && bGrabSettled)
+		{
+			bIsGunFiring = true;
+		}
+		else if (bConfidentOpen)
+		{
+			bIsGunFiring = false;
+		}
+		// else: occluded/ambiguous tip -> keep the current bIsGunFiring (don't drop fire on a hidden tip).
+		const bool bFire = HeldActor && bIsGunFiring;
+
+		// CONTINUOUS (throttled ~3x/sec) tuning log: prints the middle ratio WHENEVER a gun is held —
+		// not just on a fire-state change — so even a never-fires case still shows the real curl numbers.
+		const int32 FireHandIdx = bIsRight ? 0 : 1;
+		if (HeldActor)
+		{
+			GGunTuneLogAccum[FireHandIdx] += DeltaTime;
+			if (GGunTuneLogAccum[FireHandIdx] >= 0.33f)
+			{
+				GGunTuneLogAccum[FireHandIdx] = 0.0f;
+				UE_LOG(LogTemp, Warning, TEXT("[GunTune] %s middleRatio=%.3f valid=%d fire=%d (enter<%.2f exit>%.2f)"),
+					bIsRight ? TEXT("R") : TEXT("L"), MiddleRatio, bValid ? 1 : 0, bFire ? 1 : 0, CurlEnter, CurlExit);
+			}
+		}
+		APlayerController* FirePC = GetWorld() ? UGameplayStatics::GetPlayerController(GetWorld(), 0) : nullptr;
+		if (HeldActor && FirePC)
+		{
+			if (bFire) HeldActor->EnableInput(FirePC); else HeldActor->DisableInput(FirePC);
+			// Auto-fire: while the trigger is HELD, repeat the shot once per r.Gun.AutoFireInterval (default
+			// 1s). First shot is immediate (LastGunShotTime starts at -1000); on release we reset it so the
+			// next curl fires immediately again. (Previously injected every tick, deferring to the weapon's
+			// own fire rate; now it's a deliberate steady cadence.)
+			if (bFire)
+			{
+				const double NowFire = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+				if (NowFire - LastGunShotTime >= CVarGunAutoFireInterval.GetValueOnGameThread())
+				{
+					LastGunShotTime = NowFire;
+					static TWeakObjectPtr<UInputAction> CachedShootIA;
+					if (!CachedShootIA.IsValid())
+					{
+						CachedShootIA = Cast<UInputAction>(StaticLoadObject(UInputAction::StaticClass(), nullptr,
+							TEXT("/Game/VRTemplate/Input/Actions/IA_Shoot_Right.IA_Shoot_Right")));
+					}
+					if (ULocalPlayer* LP = FirePC->GetLocalPlayer())
+					{
+						if (auto* EI = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LP))
+						{
+							if (CachedShootIA.IsValid())
+							{
+								EI->InjectInputForAction(CachedShootIA.Get(), FInputActionValue(true), {}, {});
+							}
+						}
+					}
+				}
+			}
+			else
+			{
+				LastGunShotTime = -1000.0; // not firing -> next curl fires immediately
+			}
+		}
 	}
 	// Calibration runs every tick while not yet completed so it can finish
 	// the moment the user holds a stable pose, even if it's mid-Tick.
@@ -341,6 +898,71 @@ void UHandTrackingComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	{
 		UpdateGestureState(DeltaTime);
 	}
+
+	// Superman fly: BOTH hands fisted -> drift slowly along the average fist direction (wrist ->
+	// middle-metacarpal). Robustness: a fist is a DIRECT valid-curl check (ratio in a curled-but-valid
+	// band, gated on IsTracking) — NOT the gesture classifier (which flickers) and NOT a bare ratio<thr
+	// (an UNtracked finger reads ratio 0, which would falsely look "curled" and keep flying). Each hand
+	// stamps the game-time it last showed a fist; flight needs both stamps within a short coast window,
+	// so brief flicker/dropout doesn't stutter it AND it stops on its own once you open your hands.
+	{
+		auto IsCurled   = [this](EHandKeypoint Tip) { const float R = ComputeFingerExtensionRatio(Tip); return R > 0.08f && R < 0.72f; };
+		auto IsExtended = [this](EHandKeypoint Tip) { return ComputeFingerExtensionRatio(Tip) > 0.85f; };
+		const bool bRawFist = IsTracking()
+			&& IsCurled(EHandKeypoint::IndexTip) && IsCurled(EHandKeypoint::MiddleTip)
+			&& IsCurled(EHandKeypoint::RingTip)  && IsCurled(EHandKeypoint::LittleTip);
+		// A CONFIDENT open palm (index/middle/ring clearly extended) -> stop NOW. This is the difference
+		// between "maybe still a fist" (coast/keep flying) and "that's definitely open" (cut immediately).
+		const bool bRawOpen = IsTracking()
+			&& IsExtended(EHandKeypoint::IndexTip) && IsExtended(EHandKeypoint::MiddleTip)
+			&& IsExtended(EHandKeypoint::RingTip);
+
+		const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+		if (bRawFist)
+		{
+			const FVector WristLoc = GetKeypointWorldTransform(EHandKeypoint::Wrist).GetLocation();
+			const FVector MetaLoc  = GetKeypointWorldTransform(EHandKeypoint::MiddleMetacarpal).GetLocation();
+			const FVector FwdDir = (MetaLoc - WristLoc).GetSafeNormal();
+			if (bIsRight) { GFlyRightFistTime = Now; GFlyRightDir = FwdDir; }
+			else          { GFlyLeftFistTime  = Now; GFlyLeftDir  = FwdDir; }
+		}
+		else if (bRawOpen)
+		{
+			// Expire this hand's fist stamp at once so flight stops immediately (no coast on a clear open).
+			if (bIsRight) GFlyRightFistTime = -1000.0; else GFlyLeftFistTime = -1000.0;
+		}
+		// else: ambiguous pose -> leave the stamp; the coast window keeps flight steady through flicker.
+
+		// Apply the movement once — from the right-hand instance — when BOTH hands fisted recently.
+		if (bIsRight && CVarFlyEnable.GetValueOnGameThread() != 0)
+		{
+			const double Coast = CVarFlyCoast.GetValueOnGameThread();
+			const bool bBothFist = (Now - GFlyLeftFistTime < Coast) && (Now - GFlyRightFistTime < Coast);
+			APawn* FlyPawn = nullptr;
+			if (APlayerController* PC = GetWorld() ? UGameplayStatics::GetPlayerController(GetWorld(), 0) : nullptr)
+			{
+				FlyPawn = PC->GetPawn();
+			}
+			if (bBothFist)
+			{
+				const FVector Dir = (GFlyLeftDir + GFlyRightDir).GetSafeNormal();
+				if (!Dir.IsNearlyZero() && FlyPawn)
+				{
+					FlyPawn->AddActorWorldOffset(Dir * CVarFlySpeed.GetValueOnGameThread() * DeltaTime, false);
+				}
+				// Soft wind + ambient dust whizzing past: a vection cue that helps reduce motion sickness.
+				EnsureFlyFX(FlyPawn);
+				SetFlyFXActive(true);
+			}
+			else
+			{
+				SetFlyFXActive(false);
+			}
+		}
+	}
+
+	// Surface active gestures as Enhanced Input actions (e.g. IA_IndexThumbPinch).
+	InjectGestureActions();
 
 	if (bShowGestureLabel)
 	{
@@ -358,6 +980,7 @@ void UHandTrackingComponent::UpdatePinchState(const FTransform& ThumbTipWorld, c
 	{
 		bIsPinching = true;
 		OnPinchStarted.Broadcast(GetSide());
+		NotifyPinchGrab(true);
 		if (bSpawnDotOnIndexPinch)
 		{
 			const FVector Midpoint = (ThumbTipWorld.GetLocation() + IndexTipWorld.GetLocation()) * 0.5f;
@@ -368,6 +991,7 @@ void UHandTrackingComponent::UpdatePinchState(const FTransform& ThumbTipWorld, c
 	{
 		bIsPinching = false;
 		OnPinchEnded.Broadcast(GetSide());
+		NotifyPinchGrab(false);
 	}
 }
 
@@ -398,6 +1022,79 @@ void UHandTrackingComponent::UpdatePinkyPinchState(const FTransform& ThumbTipWor
 	{
 		bIsPinkyPinching = false;
 		OnPinkyPinchEnded.Broadcast(GetSide());
+	}
+}
+
+// Ring-thumb pinch (on a FREE hand) is dual-purpose, gated by GHeldGrabCount:
+//  - hands EMPTY  -> A/B the visionOS translucent-depth-fixup CVars (glass-over-passthrough fix; no AVP console).
+//  - gun HELD     -> step the HELD gun's grip orientation through the 24 axis-aligned poses (r.Gun.OrientIndex*).
+// Both set CVars at runtime so the right value is found on-device without a rebuild per guess.
+void UHandTrackingComponent::UpdateRingPinchState(const FTransform& ThumbTipWorld, const FTransform& RingTipWorld)
+{
+	const float DistanceCm = FVector::Dist(ThumbTipWorld.GetLocation(), RingTipWorld.GetLocation());
+	const float EnterCm = PinkyPinchThresholdCm;
+	const float ExitCm = PinkyPinchThresholdCm + PinkyPinchReleaseHysteresisCm;
+
+	if (!bIsRingPinching && DistanceCm <= EnterCm)
+	{
+		bIsRingPinching = true;
+
+		// @AGILELENS - dual-purpose ring-pinch. With nothing held, A/B the visionOS translucent-depth-fixup
+		// over passthrough (no console on AVP). The engine now writes the RESOLVED depth swapchain (what the
+		// compositor reads), so unlike the pre-fix build a NORMAL non-zero value should actually land — find
+		// the smallest value that kills the blocky. {WritesDepth on/off, reverse-Z fixup value}; fixed order
+		// so you can count pinches from launch. Slot 0 = OFF (blocky baseline). HUD tag: [DepthCycle].
+		if (GHeldGrabCount <= 0)
+		{
+			static const struct { int32 On; float Value; } DepthPresets[] = {
+				{ 0, 0.0f }, { 1, 0.001f }, { 1, 0.01f }, { 1, 0.05f }, { 1, 0.2f }, { 1, 0.5f },
+			};
+			const int32 DepthN = UE_ARRAY_COUNT(DepthPresets);
+			GTranslucentDepthTestIndex = (GTranslucentDepthTestIndex + 1) % DepthN;
+			const auto& P = DepthPresets[GTranslucentDepthTestIndex];
+			if (IConsoleVariable* CvOn = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Mobile.VisionOS.TranslucentWritesDepth")))
+			{
+				CvOn->Set(P.On, ECVF_SetByConsole);
+			}
+			if (IConsoleVariable* CvVal = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Mobile.VisionOS.TranslucentDepthFixupValue")))
+			{
+				CvVal->Set(P.Value, ECVF_SetByConsole);
+			}
+			const FString DMsg = FString::Printf(TEXT("[DepthCycle] %d/%d  %s  value=%.4f"),
+				GTranslucentDepthTestIndex, DepthN - 1, P.On ? TEXT("ON") : TEXT("OFF"), P.Value);
+			UE_LOG(LogTemp, Warning, TEXT("%s"), *DMsg);
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(7788, 8.0f, P.On ? FColor::Green : FColor::Orange, DMsg);
+			}
+			return;
+		}
+
+		// Step the held-gun grip orientation (0..23) for the HOLDING hand. This ring-pinch is on the FREE
+		// hand (the holding hand's thumb is busy with the index-thumb grip), so it tunes the OPPOSITE hand —
+		// which is the one actually holding the gun. Per-hand because the pinch anchor is mirrored L/R.
+		// Spin until muzzle-forward + upright, read the index off the HUD, then bake it into the default.
+		const bool bHoldingRight = !bIsRight;  // the free (pinching) hand tunes the other hand's gun
+		const TCHAR* CvName = bHoldingRight ? TEXT("r.Gun.OrientIndexRight") : TEXT("r.Gun.OrientIndexLeft");
+		const int32 Cur = bHoldingRight
+			? CVarGunOrientRight.GetValueOnGameThread() : CVarGunOrientLeft.GetValueOnGameThread();
+		const int32 Next = (FMath::Max(0, Cur) + 1) % GGunOrientCount;
+		if (IConsoleVariable* Cv = IConsoleManager::Get().FindConsoleVariable(CvName))
+		{
+			Cv->Set(Next, ECVF_SetByConsole);
+		}
+		const FRotator R = GunGripRotationFromIndex(Next);
+		const FString Msg = FString::Printf(TEXT("[GunOrient] %s-hand index=%d/%d  rot=(P=%.0f Y=%.0f R=%.0f)"),
+			bHoldingRight ? TEXT("R") : TEXT("L"), Next, GGunOrientCount - 1, R.Pitch, R.Yaw, R.Roll);
+		UE_LOG(LogTemp, Warning, TEXT("%s"), *Msg);
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(7788, 8.0f, FColor::Cyan, Msg);
+		}
+	}
+	else if (bIsRingPinching && DistanceCm >= ExitCm)
+	{
+		bIsRingPinching = false;
 	}
 }
 
@@ -981,14 +1678,26 @@ void UHandTrackingComponent::TravelToOtherLevel()
 	UGameplayStatics::OpenLevel(this, FName(*Target));
 }
 
-void UHandTrackingComponent::DrawLevelLabel() const
+void UHandTrackingComponent::DrawLevelLabel()
 {
-#if ENABLE_DRAW_DEBUG
+	// Rendered as an OPAQUE TextRenderComponent (scene geometry) rather than
+	// DrawDebugString — debug-canvas text composites poorly over passthrough/MR,
+	// reading as ghosted/translucent. Opaque scene text composites cleanly.
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
 	}
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (!PC || !PC->PlayerCameraManager)
+	{
+		if (LevelLabelText) { LevelLabelText->SetVisibility(false); }
+		return;
+	}
+	const FVector CamLoc = PC->PlayerCameraManager->GetCameraLocation();
+	const FRotator CamRot = PC->PlayerCameraManager->GetCameraRotation();
+	const FVector Anchor = CamLoc + CamRot.Vector() * 200.0f + FVector(0.0f, 0.0f, 25.0f);
+
 	const bool bLevelB = IsInLevelB();
 	const FString Text = bLevelB
 		? TEXT("LEVEL B\npinky-pinch -> back to A")
@@ -996,19 +1705,29 @@ void UHandTrackingComponent::DrawLevelLabel() const
 	// Level B reads cyan, Level A green — an instant, unmistakable colour flip on travel.
 	const FColor Color = bLevelB ? FColor(80, 200, 255) : FColor(120, 255, 120);
 
-	// Anchor the banner ~2 m in front of the player's camera (HMD) so it's always in view.
-	FVector Anchor(0.0f, 0.0f, 150.0f);
-	if (APlayerController* PC = World->GetFirstPlayerController())
+	if (!LevelLabelText)
 	{
-		if (PC->PlayerCameraManager)
+		LevelLabelText = NewObject<UTextRenderComponent>(GetOwner());
+		LevelLabelText->SetupAttachment(this);
+		LevelLabelText->RegisterComponent();
+		LevelLabelText->SetHorizontalAlignment(EHTA_Center);
+		LevelLabelText->SetVerticalAlignment(EVRTA_TextCenter);
+		LevelLabelText->SetWorldSize(9.0f);
+		LevelLabelText->SetCastShadow(false);
+		// Opaque text material so it composites correctly over passthrough.
+		if (UMaterialInterface* OpaqueText = Cast<UMaterialInterface>(StaticLoadObject(
+				UMaterialInterface::StaticClass(), nullptr,
+				TEXT("/Engine/EngineMaterials/DefaultTextMaterialOpaque.DefaultTextMaterialOpaque"))))
 		{
-			const FVector CamLoc = PC->PlayerCameraManager->GetCameraLocation();
-			const FRotator CamRot = PC->PlayerCameraManager->GetCameraRotation();
-			Anchor = CamLoc + CamRot.Vector() * 200.0f + FVector(0.0f, 0.0f, 25.0f);
+			LevelLabelText->SetTextMaterial(OpaqueText);
 		}
 	}
-	DrawDebugString(World, Anchor, Text, nullptr, Color, 0.0f, true, 4.0f);
-#endif
+	LevelLabelText->SetVisibility(true);
+	LevelLabelText->SetText(FText::FromString(Text));
+	LevelLabelText->SetTextRenderColor(Color);
+	LevelLabelText->SetWorldLocation(Anchor);
+	// Billboard: +X (text facing) points back at the camera so it's readable.
+	LevelLabelText->SetWorldRotation((CamLoc - Anchor).Rotation());
 }
 
 void UHandTrackingComponent::EnsureLabelInitialized()
