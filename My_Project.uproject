@@ -66,6 +66,10 @@
 		{
 			"Name": "SpatialAccessoryTracking",
 			"Enabled": true
+		},
+		{
+			"Name": "Pinchwork",
+			"Enabled": true
 		}
 	],
 	"TargetPlatforms": [

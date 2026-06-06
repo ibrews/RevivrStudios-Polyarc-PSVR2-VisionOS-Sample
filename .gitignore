@@ -54,5 +54,6 @@ Plugins/*/Intermediate/
 
 
 # ECABridge plugin is its own repo (ibrews/ECABridge) — install per-machine,
-# don't bundle (3.2GB+ would bloat clones)
-Plugins/ECABridge/
+# don't bundle (3.2GB+ would bloat clones). No trailing slash: ECABridge carries
+# its own .git, so git would otherwise stage it as an embedded gitlink on `add -A`.
+Plugins/ECABridge

@@ -12,6 +12,11 @@ public class My_Project : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "XRBase", "EnhancedInput", "HeadMountedDisplay" });
 
+		// Hand-tracking gameplay was extracted into the Pinchwork plugin (own repo,
+		// sold standalone). The VRPawn adds Pinchwork's components, so the project
+		// depends on the plugin module.
+		PrivateDependencyModuleNames.Add("Pinchwork");
+
 		// SpatialAccessoryTracking plugin — needed for Swift bridge thumbstick input on visionOS
 		if (Target.Platform == UnrealTargetPlatform.VisionOS)
 		{

@@ -76,7 +76,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FHandTrackingGestureEvent, EHandGes
 // for delegate consumers and Blueprint readability.
 
 UCLASS(ClassGroup = (VR), meta = (BlueprintSpawnableComponent), DisplayName = "Hand Tracking (OpenXR)")
-class MY_PROJECT_API UHandTrackingComponent : public USceneComponent
+class PINCHWORK_API UHandTrackingComponent : public USceneComponent
 {
 	GENERATED_BODY()
 

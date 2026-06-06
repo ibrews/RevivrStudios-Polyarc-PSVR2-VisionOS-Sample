@@ -76,7 +76,7 @@ enum class EThumbStrategyTest : uint8
 };
 
 UCLASS(ClassGroup = (VR), meta = (BlueprintSpawnableComponent), DisplayName = "Hand Skeletal Driver")
-class MY_PROJECT_API UHandSkeletalDriverComponent : public USceneComponent
+class PINCHWORK_API UHandSkeletalDriverComponent : public USceneComponent
 {
 	GENERATED_BODY()
 

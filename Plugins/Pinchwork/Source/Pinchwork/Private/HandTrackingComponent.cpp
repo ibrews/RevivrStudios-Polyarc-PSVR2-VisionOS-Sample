@@ -34,7 +34,6 @@
 #include "Sound/SoundBase.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
-#include "GamepadInputSetup.h"
 #include "HandSkeletalDriverComponent.h"
 
 // --- Gun: middle-curl fire trigger + grip offset (tunable; dial on-device, then bake into the gun BP) ---
