@@ -1,3 +1,12 @@
+> 🟢 **CURRENT WORK (2026-06-03) is NOT this file.** The live handoff — "Pinchwork" rename, two
+> themed travel levels, pinch-grab v2, keep-in-RAM, forest-hand walnut, app icon, passthrough
+> translucency, and the **uncommitted working tree + pending cook batch + arm64-Lightmass engine
+> state** — is in **[`claude-progress.md`](./claude-progress.md)** → read the
+> "⛔ CURRENT STATE & PENDING BATCH" section FIRST. The OpenXR hand-rig task below is an older,
+> separate, RESOLVED work stream (kept for reference).
+
+---
+
 # Session Handoff — OpenXR hand tracking on AVP — RESOLVED
 
 **Session date:** 2026-05-23 (v24)

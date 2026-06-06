@@ -1,0 +1,48 @@
+OVERNIGHT BUILD — 3-PHASE PLAN (monitor reads this each wake; follow the STATE MACHINE)
+status: /tmp/overnight_status.txt   log: /tmp/overnight_build.log
+scripts (also in /Users/Shared/GH/RevivrStudios-Polyarc-PSVR2-VisionOS-Sample/_overnight/):
+  /tmp/overnight_build.sh (phase1)  /tmp/overnight_phase2.sh  /tmp/overnight_phase3.sh
+AVP device: 2642855C-6B73-5D5B-9387-6B110E7A7CF3
+
+PHASE 1 (launched ~01:50, RUNNING): clean engine UnrealEditor rebuild (rm intermediate+binaries;
+  Build.sh UnrealEditor Mac Development -Architecture=arm64 -MaxParallelActions=6). ~1-3h.
+  It SELF-HALTS at its own STAGE2 ("FAILED: editor still broken") because the project ping fails
+  (the GAME editor module My_ProjectEditor is still stale vs the new engine BuildId). That halt is
+  EXPECTED and is the handoff point to phase 2.
+
+PHASE 2: build My_ProjectEditor (game editor target, consistent BuildId) -> verify GAME_OK ->
+  content (hand fix: M_Wood_Walnut used_with_skeletal_mesh=True; glass-look M_GlassLookOpaque on the
+  statue; material audit) -> bake BOTH maps -> cook+package Pinchwork -> install newest .app
+  (Pinchwork.app, after the ProjectName rename) to the AVP.
+
+PHASE 3 (best-effort, the user's add-on): ACCVR24 = /Users/alex/dev/ACCVR24_Mac56/ACCVR24.uproject.
+  Backs up ACCVR24/Config (NOT git-tracked), applies Pinchwork's VisionOS config, then
+  BuildCookRun VisionOS -build (compile+cook+package). LIKELY to fail on a non-VisionOS plugin
+  (OculusXR/Odin/AppleARKitFaceSupport/Mocopi) — report honestly, do NOT fix plugins blindly.
+  ACCVR24 + Pinchwork are unaffected on failure (config backed up).
+
+STATE MACHINE (each wake: read status + `tail -40` log + `df -g /Users/Shared` + procs):
+  1. status=STAGE1 (engine build, "[N/4691]"): report N/4691 + free disk; reschedule ~1500s; NEVER
+     interrupt the engine build.
+  2. status past STAGE1 (STAGE2/FAILED) AND phase2 not launched (no /tmp/overnight_phase2_wrap.log):
+     kill ONLY `bash /tmp/overnight_build.sh` + its `caffeinate` parent (NOT any clang/ld/Build.sh);
+     then: cd /Users/Shared/GH/UnrealEngineVisionOS && nohup caffeinate -i bash /tmp/overnight_phase2.sh > /tmp/overnight_phase2_wrap.log 2>&1 & disown
+     report phase2 started; reschedule ~1500s.
+  3. status=P2-*: report stage+disk; reschedule ~1800s.
+  4. status="ALL DONE..." from phase2 (Pinchwork installed) AND phase3 not launched (no
+     /tmp/overnight_phase3_wrap.log): cd /Users/Shared/GH/UnrealEngineVisionOS && nohup caffeinate -i bash /tmp/overnight_phase3.sh > /tmp/overnight_phase3_wrap.log 2>&1 & disown
+     report phase3 (ACCVR24, best-effort) started; reschedule ~1800s.
+  5. status=P3-*: report; reschedule ~1800s.
+  6. status="ALL DONE: ACCVR24..." (phase3 finished, success OR fail): give the FULL final summary:
+       Pinchwork: engine editor rebuilt + My_ProjectEditor built; GAME_OK=True; hand fix; glass on
+         statue; AUDIT 'BROKEN?' lines; bake BuiltData md5s changed from baselines (TravelTestMap
+         6196ba7f, VRTemplateMap 1bd4e6b1); cook exit 0; installed Pinchwork.app.
+       ACCVR24: BuildCookRun exit; packaged .app path OR the failure reason (which plugin).
+     Then STOP — no more wakeups.
+  7. status FAILED/ABORTED in phase1 or phase2: diagnose from log, report, STOP (await user; do NOT
+     auto-restart a multi-hour build). A phase3 FAIL is acceptable (best-effort) -> still go to (6).
+
+DISK: build started at 55G after the rm. Warn the user if free < 12G. Scripts self-abort < 6-9G
+  (graceful, no corruption). If aborted, surface it; do not silently restart.
+NEVER run git clean/checkout/stash or otherwise discard the project working tree (610 lines of
+  uncommitted feature work + content). git status before any tree-touching op.
