@@ -27,16 +27,30 @@ own content only, zero Polyarc); engine fix = separate `.patch`. Attribution = *
 1. **Plugin not yet portable** — its constructor still hard-refs `/Game/...` content (the `IA_*`
    actions). Builds *inside the dev project*; a blank-project buyer won't get the input actions
    until **Phase 3** migrates content into the plugin's `Content/` (editor + redirector fixup).
-2. **Engine commit `4f59b2fea5c6` is LOCAL-ONLY** — the arm64-Lightmass port is NOT pushed to
-   `ibrews/UnrealEngine` (`branch -r --contains` empty). At risk until pushed. (The `.patch` in
-   the plugin is a mitigation, but the engine fork itself should be pushed.)
+2. ~~Engine commit local-only~~ ✅ **RESOLVED 2026-06-07** — pushed `fix/visionos-lightmass-arm64`
+   (3 fixes incl. `4f59b2fea5c6`) to private `ibrews/UnrealEngine`. `branch -r --contains` now resolves.
 
-**PENDING (need the UE editor, via ECABridge/ue5-mcp — user drives the editor, I script it):**
-- Phase 3: migrate `IA_*` input actions + WA/glass materials into `Plugins/Pinchwork/Content/`,
-  repoint the C++ `ConstructorHelpers` paths `/Game/...`→`/Pinchwork/...`, resave `VRPawn`
-  (bakes new class path; lets `CoreRedirects` be dropped later).
+**⛔ PHASE 3 BLOCKED (2026-06-07) — concurrent ACCVR24 cook, NOT a code problem:**
+- The headless content-migration commandlet (`/tmp/pinchwork_migrate_content.py`, ready) died at
+  editor startup on `Plugin 'PCG' failed to load because module 'PCGCompute' could not be found` =
+  **Gotcha 10** (cross-project BuildId mismatch) — an **ACCVR24 `BuildCookRun` (14 procs)** is running
+  on the shared engine. Verified: a known-good run had 0 PCGCompute errors; the failed run had 1.
+- **RESUME PLAN (when ACCVR24 idle):** (1) `Build.sh My_ProjectEditor Mac Development -Project=<uproj>
+  -Architecture=arm64 -MaxParallelActions=6` (relink to current BuildId); (2) run the migration
+  commandlet; (3) `sed` the 6 `ConstructorHelpers` paths in `HandTrackingComponent.cpp`
+  `/Game/VRTemplate/Input/Actions/Hands/`→`/Pinchwork/Input/Actions/Hands/`; (4) rebuild + re-verify.
+  Do NOT rebuild while ACCVR24's cook runs (UBT mutex + would disrupt their cook).
+- **Scope note:** only the **6 `IA_*ThumbPinch`** actions are hard-owned plugin content. The folder
+  also has 8 other `IA_Hand_*` (Grasp/IndexCurl/Point/ThumbUp) NOT referenced by plugin C++ — leave
+  them. StarterContent audio / MannequinXR / `IA_Shoot` (Polyarc's) degrade gracefully — leave them.
+
+**PENDING (editor; after Phase 3):**
 - Phase 4: clean-room demo `.uproject` (Epic + own content only).
 - Phase 6: create `ibrews/Pinchwork` + demo repos (README-first), after 3–4 verified.
+
+**KB captured 2026-06-07:** `intelligence/techniques/ue5-extract-gameplay-into-owned-plugin.md` (new
+workflow doc); updated `apple-silicon-ue-lightmass-arm64.md` (patch bundled + pushed) + Gotcha 10
+recurrence in `ue-visionos-cook-build-gotchas.md`.
 
 ---
 
