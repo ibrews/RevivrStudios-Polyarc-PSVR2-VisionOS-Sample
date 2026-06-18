@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
-	"Version": 1,
-	"VersionName": "1.0",
+	"Version": 2,
+	"VersionName": "2.0",
 	"FriendlyName": "Pinchwork",
-	"Description": "OpenXR hand-tracking and gesture system: per-finger pinches (index/middle/ring/pinky-thumb), curl-pattern gesture recognition with per-user calibration, pinch-to-grab with throw velocity, and gesture-to-Enhanced Input injection. Built for Apple Vision Pro and any OpenXR hand-tracking runtime.",
+	"Description": "OpenXR hand-tracking and gesture system: per-finger pinches, curl-pattern gesture recognition with per-user calibration, pinch-to-grab with throw velocity, gesture-to-Enhanced Input injection, two-hand transforms (scale/rotate/translate), and gesture macros — on an engine-agnostic, unit-tested core. Built for Apple Vision Pro and any OpenXR hand-tracking runtime.",
 	"Category": "Input",
 	"CreatedBy": "Alex Coulombe",
 	"CreatedByURL": "https://github.com/ibrews/Pinchwork",
