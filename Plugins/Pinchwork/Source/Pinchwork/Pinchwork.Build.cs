@@ -8,7 +8,10 @@ public class Pinchwork : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
+		// PinchworkCore: the engine-agnostic recognition + two-hand + sequence
+		// math (also unit-tested standalone via Tests/run_tests.sh). Public
+		// because Pinchwork's public component headers expose core types.
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "PinchworkCore" });
 
 		// XRBase: IHandTracker modular feature + HMD keypoint types.
 		// EnhancedInput: gesture -> input-action injection.
