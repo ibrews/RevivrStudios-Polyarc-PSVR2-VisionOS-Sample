@@ -14,8 +14,10 @@ public class My_Project : ModuleRules
 
 		// Hand-tracking gameplay was extracted into the Pinchwork plugin (own repo,
 		// sold standalone). The VRPawn adds Pinchwork's components, so the project
-		// depends on the plugin module.
+		// depends on the plugin module. PinchworkCore is the engine-agnostic math
+		// the PinchworkShowcaseSubsystem drives directly.
 		PrivateDependencyModuleNames.Add("Pinchwork");
+		PrivateDependencyModuleNames.Add("PinchworkCore");
 
 		// SpatialAccessoryTracking plugin — needed for Swift bridge thumbstick input on visionOS
 		if (Target.Platform == UnrealTargetPlatform.VisionOS)
