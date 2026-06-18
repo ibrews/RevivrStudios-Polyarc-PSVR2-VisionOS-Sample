@@ -31,7 +31,7 @@ namespace Pinchwork
 		FingerGunsShoot
 	};
 
-	const char* GestureName(EGesture G);
+	PINCHWORKCORE_API const char* GestureName(EGesture G);
 
 	// Tunables that in 1.0 were UPROPERTYs on the component. Defaults match the
 	// shipped component values exactly.
@@ -53,7 +53,7 @@ namespace Pinchwork
 	// two-pose walkthrough, plus the per-finger thresholds derived from them.
 	// Port of the shared calibration state (GSharedFistRatios / GSharedOpenRatios
 	// / GSharedCalibratedThresholds + TryAdvanceCalibrationPhase's midpoint math).
-	struct FCalibration
+	struct PINCHWORKCORE_API FCalibration
 	{
 		bool  bCalibrated = false;
 		float FistRatios[5] = {};
@@ -72,7 +72,7 @@ namespace Pinchwork
 	// 0 ≈ the user's fist pose and 1 ≈ their open pose. Calibrated path is a
 	// clean per-finger remap; uncalibrated path is a soft ramp around the global
 	// threshold. Port of NormalizeFingerRatio.
-	float NormalizeFingerRatio(int FingerIdx, float Ratio, const FGestureConfig& Config, const FCalibration& Calib);
+	PINCHWORKCORE_API float NormalizeFingerRatio(int FingerIdx, float Ratio, const FGestureConfig& Config, const FCalibration& Calib);
 
 	struct FGestureResult
 	{
@@ -85,20 +85,20 @@ namespace Pinchwork
 	// Does NOT apply the ThumbsUp/ThumbOverFist orientation split — that needs
 	// the 3D pose and is handled in RecognizeGesture. Port of
 	// ClassifyGestureByConfidence.
-	FGestureResult ClassifyByConfidence(const float NormalizedRatios[5], const FGestureConfig& Config);
+	PINCHWORKCORE_API FGestureResult ClassifyByConfidence(const float NormalizedRatios[5], const FGestureConfig& Config);
 
 	// Full single-frame recognition: raw ratios → normalize → classify →
 	// orientation disambiguation. This is the function the mock harness and the
 	// UE wrapper both call. (Temporal stability debouncing is a stateful layer
 	// on top — see FGestureStabilizer.)
-	FGestureResult RecognizeGesture(const FHandPose& Pose, const FGestureConfig& Config, const FCalibration& Calib);
+	PINCHWORKCORE_API FGestureResult RecognizeGesture(const FHandPose& Pose, const FGestureConfig& Config, const FCalibration& Calib);
 
 	// Per-finger pinch detector with release hysteresis — Pinchwork's namesake.
 	// Enter the pinch when the two fingertips close within ThresholdCm; only
 	// release once they separate past ThresholdCm + ReleaseHysteresisCm, so a
 	// fingertip hovering at the boundary doesn't chatter the pinch on/off. Port
 	// of UpdatePinchState's enter/exit logic.
-	struct FPinchDetector
+	struct PINCHWORKCORE_API FPinchDetector
 	{
 		float ThresholdCm = 3.0f;
 		float ReleaseHysteresisCm = 1.0f;
@@ -114,7 +114,7 @@ namespace Pinchwork
 	// `StabilityWindowSec` before it commits, filtering the momentary "None"
 	// frames seen during transitions (fist→peace, etc.). Port of the
 	// PendingGesture / PendingGestureStableFor logic in UpdateGestureState.
-	struct FGestureStabilizer
+	struct PINCHWORKCORE_API FGestureStabilizer
 	{
 		float    StabilityWindowSec = 0.15f;
 		EGesture Active = EGesture::None;

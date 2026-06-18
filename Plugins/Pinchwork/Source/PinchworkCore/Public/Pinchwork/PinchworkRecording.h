@@ -51,12 +51,12 @@ namespace Pinchwork
 	//   F <time> <26×(x y z)>  V <26 validity bits>
 	// (lines beginning with '#' are comments). File I/O is the caller's job —
 	// the core stays free of <fstream>/platform concerns; pass the file's bytes.
-	std::string Serialize(const FRecording& Rec);
-	bool        Deserialize(const std::string& Text, FRecording& OutRec);
+	PINCHWORKCORE_API std::string Serialize(const FRecording& Rec);
+	PINCHWORKCORE_API bool        Deserialize(const std::string& Text, FRecording& OutRec);
 
 	// Replay: run every frame through RecognizeGesture + the stabilizer and
 	// return the committed gesture timeline (one entry per frame, using each
 	// frame's own timestamp delta). This is what a regression test asserts.
-	std::vector<EGesture> ReplayRecognized(
+	PINCHWORKCORE_API std::vector<EGesture> ReplayRecognized(
 		const FRecording& Rec, const FGestureConfig& Config, const FCalibration& Calib, float StabilityWindowSec = 0.15f);
 }
