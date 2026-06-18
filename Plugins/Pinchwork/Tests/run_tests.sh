@@ -21,10 +21,18 @@ clang++ -std=c++17 -O2 -Wall -Wextra -Werror \
 	"$SRC/PinchworkGestures.cpp" \
 	"$SRC/PinchworkTwoHand.cpp" \
 	"$SRC/PinchworkSequence.cpp" \
+	"$SRC/PinchworkRecording.cpp" \
 	-o "$OUT"
 
 echo "Running..."
 "$OUT"
 RC=$?
+
+# Optional pass-through: ./run_tests.sh --replay <file>  (or --record-sample <file>)
+if [ "${1:-}" = "--replay" ] || [ "${1:-}" = "--record-sample" ]; then
+	"$OUT" "$@"
+	RC=$?
+fi
+
 rm -rf "$OUTDIR"
 exit $RC

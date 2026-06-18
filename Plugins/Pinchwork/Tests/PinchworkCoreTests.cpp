@@ -13,9 +13,14 @@
 #include "Pinchwork/PinchworkGestures.h"
 #include "Pinchwork/PinchworkTwoHand.h"
 #include "Pinchwork/PinchworkSequence.h"
+#include "Pinchwork/PinchworkRecording.h"
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 using namespace Pinchwork;
 using namespace PinchworkTest;
@@ -270,8 +275,89 @@ static void Test_GestureSequences()
 	CHECK(R.Progress(ComboId) == 1);
 }
 
-int main()
+// A synthetic ~0.8 s clip: 8 fist frames then 8 open-palm frames at 20 fps.
+// Long enough that the stabilizer commits Fist, then OpenPalm.
+static FRecording MakeFistToOpenRecording()
 {
+	FRecorder Rec;
+	float t = 0.0f;
+	for (int i = 0; i < 8; ++i) { Rec.Capture(t, PoseFist());     t += 0.05f; }
+	for (int i = 0; i < 8; ++i) { Rec.Capture(t, PoseOpenPalm()); t += 0.05f; }
+	return Rec.Out;
+}
+
+static void Test_RecordReplay()
+{
+	Section("record / replay round-trip");
+	const FRecording Rec = MakeFistToOpenRecording();
+
+	// Serialize → deserialize → the frames survive intact.
+	const std::string Text = Serialize(Rec);
+	FRecording Back;
+	CHECK(Deserialize(Text, Back));
+	CHECK(Back.Frames.size() == Rec.Frames.size());
+	CHECK_NEAR(Back.Frames[3].TimeSec, Rec.Frames[3].TimeSec, 1e-4f);
+	CHECK_NEAR(Back.Frames[3].Pose.Joint(EKeypoint::IndexTip).Y,
+	           Rec.Frames[3].Pose.Joint(EKeypoint::IndexTip).Y, 1e-3f);
+
+	// A missing/garbage header is rejected.
+	FRecording Bad;
+	CHECK(!Deserialize("garbage\nF 0 0 0 0", Bad));
+
+	// Replaying the deserialized clip reproduces the Fist→OpenPalm timeline.
+	FGestureConfig Cfg;
+	FCalibration Cal;
+	const std::vector<EGesture> Timeline = ReplayRecognized(Back, Cfg, Cal);
+	CHECK(Timeline.size() == Back.Frames.size());
+	CHECK_GESTURE(Timeline.back(), EGesture::OpenPalm);
+	bool bSawFist = false;
+	for (EGesture G : Timeline) { if (G == EGesture::Fist) { bSawFist = true; } }
+	CHECK(bSawFist);
+}
+
+// CLI: author a sample fixture, or replay one and print its gesture timeline.
+static int RunRecordSample(const char* Path)
+{
+	const FRecording Rec = MakeFistToOpenRecording();
+	std::ofstream F(Path);
+	if (!F) { std::printf("cannot write %s\n", Path); return 1; }
+	F << Serialize(Rec);
+	std::printf("wrote %zu frames -> %s\n", Rec.Frames.size(), Path);
+	return 0;
+}
+
+static int RunReplay(const char* Path)
+{
+	std::ifstream F(Path);
+	if (!F) { std::printf("cannot read %s\n", Path); return 1; }
+	std::stringstream SS;
+	SS << F.rdbuf();
+	FRecording Rec;
+	if (!Deserialize(SS.str(), Rec)) { std::printf("parse failed: %s\n", Path); return 1; }
+
+	FGestureConfig Cfg;
+	FCalibration Cal;
+	const std::vector<EGesture> Timeline = ReplayRecognized(Rec, Cfg, Cal);
+	std::printf("replayed %zu frames from %s — committed gesture timeline:\n", Rec.Frames.size(), Path);
+	EGesture Last = EGesture::None;
+	bool bFirst = true;
+	for (size_t i = 0; i < Timeline.size(); ++i)
+	{
+		if (bFirst || Timeline[i] != Last)
+		{
+			std::printf("  t=%.2f  %s\n", Rec.Frames[i].TimeSec, GestureName(Timeline[i]));
+			Last = Timeline[i];
+			bFirst = false;
+		}
+	}
+	return 0;
+}
+
+int main(int argc, char** argv)
+{
+	if (argc >= 3 && std::strcmp(argv[1], "--record-sample") == 0) { return RunRecordSample(argv[2]); }
+	if (argc >= 3 && std::strcmp(argv[1], "--replay") == 0)        { return RunReplay(argv[2]); }
+
 	std::printf("=== Pinchwork 2.0 core tests ===\n");
 	Test_FingerRatios();
 	Test_GestureClassification();
@@ -284,6 +370,7 @@ int main()
 	Test_TwoHandRotate();
 	Test_TwoHandApplyDelta();
 	Test_GestureSequences();
+	Test_RecordReplay();
 
 	std::printf("=== %d checks, %d failures ===\n", g_Checks, g_Fails);
 	return g_Fails;

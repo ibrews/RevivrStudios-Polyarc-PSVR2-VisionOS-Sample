@@ -60,6 +60,16 @@ cd Plugins/Pinchwork
 
 No Unreal Engine, no UnrealBuildTool, no headset required. The same core sources compile both standalone (here) and inside UE. See [`Tests/`](Tests/) for the harness and [`Source/PinchworkCore/`](Source/PinchworkCore/) for the math.
 
+### Record / replay
+Capture a stream of hand poses to a plain-text `.pwrec` fixture and replay it through the recognizer — author gestures off-headset and lock recognition behavior into a regression test:
+
+```bash
+./Tests/run_tests.sh --record-sample Tests/fixtures/fist-to-open.pwrec   # write a clip
+./Tests/run_tests.sh --replay        Tests/fixtures/fist-to-open.pwrec   # print its gesture timeline
+```
+
+On device, `Pinchwork::FRecorder::Capture` accumulates frames you can `Serialize` to a file; back in CI, `Deserialize` + `ReplayRecognized` asserts the gesture timeline hasn't drifted. The format is line-based and diffs cleanly in version control. A sample fixture lives in [`Tests/fixtures/`](Tests/fixtures/).
+
 ## Things to Try
 
 1. **See your gestures live.** Leave `Show Gesture Label` on, build to your headset, and make a fist / peace sign / finger guns — the detected gesture name floats above your hand in real time.
@@ -70,6 +80,7 @@ No Unreal Engine, no UnrealBuildTool, no headset required. The same core sources
 6. **Resize a hologram with both hands.** Add a `Two-Hand Manipulator`, point it at a cube, and two-hand pinch — pull your hands apart to scale it up, twist to rotate, slide to move. *(2.0)*
 7. **Author a gesture combo.** Register `fist → open palm → finger guns` on a `Gesture Sequence` component, bind `OnSequenceCompleted`, and trigger a secret action by performing the sequence. *(2.0)*
 8. **Run the test harness.** `./Tests/run_tests.sh` — watch the synthetic poses classify and the two-hand math verify in under a second, no headset needed. *(2.0)*
+9. **Replay a recorded gesture.** `./Tests/run_tests.sh --replay Tests/fixtures/fist-to-open.pwrec` and watch the committed gesture timeline (fist → open palm) print from a saved clip. *(2.0)*
 
 ## License
 

@@ -16,7 +16,13 @@
 - **Mock-joint test harness** (`Tests/`): synthesizes the 26 OpenXR joints for
   known poses and asserts gestures, the thumb-orientation split, calibration
   normalization, pinch hysteresis, the stabilizer, two-hand scale/rotate/translate,
-  and sequence match/timeout/restart. `./Tests/run_tests.sh` — 80 checks, 0 failures.
+  sequence match/timeout/restart, and record/replay round-trip.
+  `./Tests/run_tests.sh` — 88 checks, 0 failures.
+- **Gesture record / replay** (`Pinchwork::FRecorder` / `Serialize` /
+  `Deserialize` / `ReplayRecognized`): capture a hand-pose stream to a
+  human-diffable `.pwrec` fixture and replay it through the recognizer to author
+  gestures off-headset and regression-test recognition. CLI:
+  `./Tests/run_tests.sh --record-sample <file>` / `--replay <file>`.
 
 ### Changed
 - The plugin now ships **two runtime modules**: `PinchworkCore` (pure math) and
