@@ -275,6 +275,60 @@ static void Test_GestureSequences()
 	CHECK(R.Progress(ComboId) == 1);
 }
 
+static void Test_EdgeCases()
+{
+	Section("edge cases (bulletproofing)");
+
+	// Quaternion FromTo: 180° flip (antiparallel) must produce a real π
+	// rotation, not identity or NaN. +X -> -X should carry +Y to -Y.
+	{
+		const FQuat Q = FQuat::FromTo(FVec3(1, 0, 0), FVec3(-1, 0, 0));
+		CHECK_NEAR(RadToDeg(Q.GetAngleRad()), 180.0f, 0.5f);
+		const FVec3 R = Q.RotateVector(FVec3(0, 1, 0));
+		CHECK_NEAR(R.X, 0.0f, 1e-3f);
+		CHECK_NEAR(R.Y, -1.0f, 1e-3f);
+	}
+	// FromTo identical directions -> identity (no rotation, no NaN).
+	{
+		const FQuat Q = FQuat::FromTo(FVec3(0, 1, 0), FVec3(0, 1, 0));
+		CHECK_NEAR(Q.GetAngleRad(), 0.0f, 1e-3f);
+	}
+
+	// Two-hand: hands coincident at grab (zero span) must not divide by zero —
+	// scale stays 1, rotation identity.
+	{
+		FTwoHandManipulator M;
+		M.Begin(FVec3(0, 0, 0), FVec3(0, 0, 0));
+		const FManipulationDelta D = M.Update(FVec3(-5, 0, 0), FVec3(5, 0, 0));
+		CHECK_NEAR(D.Scale, 1.0f, 1e-4f);
+		CHECK_NEAR(D.Rotation.GetAngleRad(), 0.0f, 1e-3f);
+	}
+
+	// YawDelta with a near-vertical span (no horizontal component) -> 0, not NaN.
+	CHECK_NEAR(YawDeltaDegrees(FVec3(0, 0, 1), FVec3(0, 0, 1)), 0.0f, 1e-3f);
+
+	// Inactive manipulator returns an identity delta.
+	{
+		FTwoHandManipulator M;
+		const FManipulationDelta D = M.Update(FVec3(-5, 0, 0), FVec3(5, 0, 0));
+		CHECK_NEAR(D.Scale, 1.0f, 1e-4f);
+		CHECK(!M.IsActive());
+	}
+
+	// Two sequences sharing a prefix both advance; only the matched one fires.
+	{
+		FGestureSequenceRecognizer R;
+		const int A = R.AddSequence(FGestureSequence("a", { EGesture::Fist, EGesture::OpenPalm, EGesture::Peace }));
+		const int B = R.AddSequence(FGestureSequence("b", { EGesture::Fist, EGesture::OpenPalm, EGesture::RockOn }));
+		R.OnGesture(EGesture::Fist, 0.0f);
+		R.OnGesture(EGesture::OpenPalm, 0.1f);
+		CHECK(R.Progress(A) == 2 && R.Progress(B) == 2); // both at the shared prefix
+		const std::vector<int> Done = R.OnGesture(EGesture::Peace, 0.2f);
+		CHECK(Done.size() == 1 && Done[0] == A);          // only A completes
+		CHECK(R.Progress(B) == 0);                        // B broke on Peace
+	}
+}
+
 // A synthetic ~0.8 s clip: 8 fist frames then 8 open-palm frames at 20 fps.
 // Long enough that the stabilizer commits Fist, then OpenPalm.
 static FRecording MakeFistToOpenRecording()
@@ -371,6 +425,7 @@ int main(int argc, char** argv)
 	Test_TwoHandApplyDelta();
 	Test_GestureSequences();
 	Test_RecordReplay();
+	Test_EdgeCases();
 
 	std::printf("=== %d checks, %d failures ===\n", g_Checks, g_Fails);
 	return g_Fails;
