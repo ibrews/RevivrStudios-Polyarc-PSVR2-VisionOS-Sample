@@ -58,7 +58,11 @@ case "${1:-help}" in
     # Device = arm64 (no -clientarchitecture). Agile Lens signing. Immersive apps can't be remote-launched → tap.
     bcr "-ini:Engine:[/Script/MacTargetPlatform.XcodeProjectSettings]:CodeSigningTeam=$DEVICE_TEAM"
     APP="$(newest_app)"
-    DEV_ID="${DEVICE_ID:-$(xcrun devicectl list devices 2>/dev/null | awk 'tolower($0)~/vision/{print $1}' | head -1)}"
+    # Filter to physical (not simulated) Vision Pro devices only, then extract the UUID by pattern —
+    # a plain `awk '{print $1}'` grabs the wrong field for any multi-word device name (e.g. the real
+    # "Agile Alex Apple Vision Pro") and doesn't distinguish real hardware from the many visionOS
+    # simulators devicectl also lists (2026-07-30 gotcha: picked a simulator's UUID by accident).
+    DEV_ID="${DEVICE_ID:-$(xcrun devicectl list devices --filter "Reality = 'physical' AND Name CONTAINS 'Vision'" --hide-headers 2>/dev/null | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1)}"
     echo "built (Agile Lens $DEVICE_TEAM): $APP"
     if [ -n "$DEV_ID" ]; then xcrun devicectl device install app --device "$DEV_ID" "$APP"
     else echo "set DEVICE_ID, then: xcrun devicectl device install app --device <id> '$APP'"; fi
