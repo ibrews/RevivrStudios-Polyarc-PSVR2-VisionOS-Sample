@@ -28,7 +28,15 @@
 // On visionOS, PSVR2 controllers use SpatialGamepad (no extendedGamepad), so
 // Unreal's native AppleControllerInterface never sees the thumbsticks. We read
 // them directly via our Swift bridge and use the values for movement.
-#if PLATFORM_VISIONOS
+//
+// Disabled 2026-08-14 (Alex: "we're not using it at all", same as the SpatialAccessoryTracking
+// plugin dependency in My_Project.Build.cs). These externs were satisfied by that plugin's Swift
+// bridge; with the plugin disabled the symbols no longer exist, which is an undefined-symbol LINK
+// error, not a compile error - it only surfaces at the final link step. The call sites below
+// already fall back cleanly to native UE gamepad input when no PSVR2 controller is detected
+// (BHasGP/BHasBtn == 0), so removing the bridge calls entirely is behaviorally a no-op for any
+// setup that was already running without a PSVR2 Sense controller attached.
+#if 0 && PLATFORM_VISIONOS
 extern "C" {
   void SpatialAccessory_GetThumbstickValues(float *outLeftX, float *outLeftY,
                                              float *outRightX, float *outRightY,
@@ -381,7 +389,8 @@ bool UGamepadInputSetup::Tick(float DeltaTime) {
   float R2 = PC->GetInputAnalogKeyState(EKeys::Gamepad_RightTrigger);
   float L2 = PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftTrigger);
 
-#if PLATFORM_VISIONOS
+#if 0 && PLATFORM_VISIONOS
+  // Disabled 2026-08-14, see the extern "C" block above for why.
   // PSVR2 Sense controllers use SpatialGamepad — Unreal's native input system
   // never sees their thumbsticks or buttons. Read via our Swift bridge instead.
   {
