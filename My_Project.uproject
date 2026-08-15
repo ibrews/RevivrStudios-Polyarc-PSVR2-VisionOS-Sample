@@ -65,7 +65,7 @@
 		},
 		{
 			"Name": "SpatialAccessoryTracking",
-			"Enabled": false
+			"Enabled": true
 		},
 		{
 			"Name": "Pinchwork",

@@ -19,18 +19,11 @@ public class My_Project : ModuleRules
 		PrivateDependencyModuleNames.Add("Pinchwork");
 		PrivateDependencyModuleNames.Add("PinchworkCore");
 
-		// SpatialAccessoryTracking (PSVR2 Sense controller thumbstick input via Swift bridge) —
-		// disabled 2026-08-14 (Alex: "we're not using it at all"). Its Source uses
-		// FXRMotionControllerData / IXRTrackingSystem::GetMotionControllerData /
-		// RebaseObjectOrientationAndPosition, all removed from IXRTrackingSystem.h in UE 5.8 -
-		// this dependency alone was enough to break every VisionOS build against 5.8 regardless
-		// of the plugin's own Enabled state in My_Project.uproject, since it's added here
-		// unconditionally for the platform. Re-enable (and update SpatialXRTrackingWrapper.h for
-		// the new IXRTrackingSystem API) if PSVR2 Sense support is wanted again.
-		// if (Target.Platform == UnrealTargetPlatform.VisionOS)
-		// {
-		// 	PrivateDependencyModuleNames.Add("SpatialAccessoryTracking");
-		// }
+		// SpatialAccessoryTracking plugin — needed for Swift bridge thumbstick input on visionOS
+		if (Target.Platform == UnrealTargetPlatform.VisionOS)
+		{
+			PrivateDependencyModuleNames.Add("SpatialAccessoryTracking");
+		}
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
