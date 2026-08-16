@@ -178,6 +178,13 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Hand Tracking|Gestures")
 	bool bIsPinkyPinching = false;
 
+	// --- Ring-thumb gesture ---
+	// True between a ring-thumb pinch start and its release. Public + BlueprintReadOnly to match
+	// bIsPinching / bIsMiddlePinching / bIsPinkyPinching — ring was the only one left private, which
+	// meant game code could not read it even though the component already tracks it.
+	UPROPERTY(BlueprintReadOnly, Category = "Hand Tracking|Gestures")
+	bool bIsRingPinching = false;
+
 	// --- Built-in explosion on pinky pinch ---
 
 	// When true, the component spawns a transient sphere actor at the
@@ -454,7 +461,7 @@ private:
 	// live, with the index shown on the HUD — lets us find the correct muzzle-forward/upright pose
 	// on-device without a rebuild per guess. (The holding hand can't ring-pinch: its thumb grips the gun.)
 	void UpdateRingPinchState(const FTransform& ThumbTipWorld, const FTransform& RingTipWorld);
-	bool bIsRingPinching = false;
+	// bIsRingPinching moved to the public gesture block above, alongside its siblings.
 	// Latched gun-fire state (middle-curl). Occlusion-coast: a clear curl starts it, a confident open
 	// stops it, an occluded/ambiguous tip HOLDS it (a curled firing finger often hides its own tip).
 	bool bIsGunFiring = false;

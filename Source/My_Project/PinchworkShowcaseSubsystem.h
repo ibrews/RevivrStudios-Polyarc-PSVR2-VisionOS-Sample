@@ -47,6 +47,20 @@ private:
 	void UpdateMacro();
 	void DrawHud();
 
+	// --- Alpha-mode cycler (mixed-immersion debugging) ---
+	// A ring-thumb pinch on either hand steps through the candidate alpha-inversion configurations
+	// below and applies them as runtime cvars. visionOS mixed immersion composites UE's alpha against
+	// passthrough, and getting that wrong has produced two different failures on device already (whole
+	// frame semi-transparent; then opaque geometry entirely invisible). Each rebuild-and-look cycle is
+	// ~4 minutes, so cycling live and reporting what each mode looks like is far faster than guessing.
+	// Same idiom the component already uses to step r.Gun.OrientIndex on-device.
+	void UpdateAlphaModeCycler();
+	void ApplyAlphaMode(int32 Mode);
+
+	int32 AlphaMode = 0;
+	bool bPrevRingPinch = false;
+	double LastAlphaModeChangeTime = -1000.0;
+
 	// Per-hand committed pinch point (thumb-index midpoint) in world space, and
 	// whether that hand is currently pinching. Returns false if untracked.
 	bool GetHandPinch(const UHandTrackingComponent* Hand, FVector& OutPoint) const;

@@ -16,6 +16,7 @@
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "TimerManager.h"
+#include "HAL/IConsoleManager.h"   // alpha-mode cycler sets render cvars at runtime
 
 DEFINE_LOG_CATEGORY_STATIC(LogPinchworkShowcase, Log, All);
 
@@ -44,7 +45,70 @@ void UPinchworkShowcaseSubsystem::Tick(float DeltaTime)
 
 	UpdateTwoHand(DeltaTime);
 	UpdateMacro();
+	UpdateAlphaModeCycler();
 	DrawHud();
+}
+
+// Candidate alpha-inversion configurations, stepped by a ring-thumb pinch.
+// visionOS mixed immersion needs UE's alpha in the "1 = opaque" convention that CompositorServices
+// expects; UE renders the opposite, so something must invert it. There are two independent
+// implementations of that inversion plus the option of none/both, and which is right on device has
+// not been obvious from source. Rather than guess again, cycle them live and let the headset answer.
+namespace
+{
+	struct FAlphaMode
+	{
+		const TCHAR* Name;
+		int32 InlineInvert;   // r.Mobile.VisionOS.InlineAlphaInvert
+		int32 StockPass;      // r.AlphaInvertPass
+		int32 PropagateAlpha; // r.Mobile.PropagateAlpha
+	};
+
+	// Mode 0 is the current shipping default, so the app starts in its normal state.
+	static const FAlphaMode GAlphaModes[] = {
+		{ TEXT("0 inline=ON  stock=off alpha=ON  (current default)"), 1, 0, 1 },
+		{ TEXT("1 inline=off stock=ON  alpha=ON  (Epic stock pass)"), 0, 1, 1 },
+		{ TEXT("2 inline=off stock=off alpha=ON  (NO inversion)"),    0, 0, 1 },
+		{ TEXT("3 inline=ON  stock=ON  alpha=ON  (both - expect double-invert)"), 1, 1, 1 },
+		{ TEXT("4 inline=off stock=off alpha=off (no passthrough blend)"), 0, 0, 0 },
+	};
+	static constexpr int32 GNumAlphaModes = UE_ARRAY_COUNT(GAlphaModes);
+
+	static void SetCVarInt(const TCHAR* Name, int32 Value)
+	{
+		if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name))
+		{
+			// ECVF_SetByConsole outranks SetByProjectSetting, so this beats the .ini values.
+			CVar->Set(Value, ECVF_SetByConsole);
+		}
+	}
+}
+
+void UPinchworkShowcaseSubsystem::ApplyAlphaMode(int32 Mode)
+{
+	const FAlphaMode& M = GAlphaModes[FMath::Clamp(Mode, 0, GNumAlphaModes - 1)];
+	SetCVarInt(TEXT("r.Mobile.VisionOS.InlineAlphaInvert"), M.InlineInvert);
+	SetCVarInt(TEXT("r.AlphaInvertPass"), M.StockPass);
+	SetCVarInt(TEXT("r.Mobile.PropagateAlpha"), M.PropagateAlpha);
+	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[ALPHAMODE] -> %s"), M.Name);
+	if (GLog) { GLog->Flush(); }   // forced flush: this log is the record of what was on screen
+}
+
+void UPinchworkShowcaseSubsystem::UpdateAlphaModeCycler()
+{
+	// Either hand. Rising edge only, with a debounce so one physical pinch steps exactly one mode.
+	const bool bRing =
+		(LeftHand.IsValid()  && LeftHand->bIsRingPinching) ||
+		(RightHand.IsValid() && RightHand->bIsRingPinching);
+
+	const double Now = FPlatformTime::Seconds();
+	if (bRing && !bPrevRingPinch && (Now - LastAlphaModeChangeTime) > 0.5)
+	{
+		LastAlphaModeChangeTime = Now;
+		AlphaMode = (AlphaMode + 1) % GNumAlphaModes;
+		ApplyAlphaMode(AlphaMode);
+	}
+	bPrevRingPinch = bRing;
 }
 
 bool UPinchworkShowcaseSubsystem::TryWire()
@@ -241,4 +305,9 @@ void UPinchworkShowcaseSubsystem::DrawHud()
 		LastMacroFired.IsEmpty() ? TEXT("-") : *LastMacroFired);
 	// Key 9101, duration 0 -> refreshed every frame (persistent overlay).
 	GEngine->AddOnScreenDebugMessage(9101, 0.f, FColor::Cyan, Hud);
+
+	// Alpha-mode cycler readout, on its own key so it renders as a separate, brighter line.
+	// Yellow because it is debug state, not normal app state - it should look temporary.
+	GEngine->AddOnScreenDebugMessage(9102, 0.f, FColor::Yellow,
+		FString::Printf(TEXT("ALPHA MODE (ring-thumb pinch to cycle): %s"), GAlphaModes[AlphaMode].Name));
 }
