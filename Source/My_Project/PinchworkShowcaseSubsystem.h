@@ -61,6 +61,19 @@ private:
 	bool bPrevRingPinch = false;
 	double LastAlphaModeChangeTime = -1000.0;
 
+	// --- Quality-mode cycler (D3 TestFlight A/B: shadow quality / Nanite / AA method) ---
+	// Pinky-pinch on either hand steps through render-quality presets, distinct from the ring-pinch
+	// alpha cycler above so both can be used independently by a remote M2/M5 tester. Every cvar here
+	// was verified NOT ECVF_ReadOnly before being added (see KB
+	// visionos-ue58-runtime-cyclable-vs-cooktime-cvars.md) -- SM6/Lumen are ECVF_ReadOnly and
+	// cannot be cycled this way; they need a separate build.
+	void UpdateQualityModeCycler();
+	void ApplyQualityMode(int32 Mode);
+
+	int32 QualityMode = 0;
+	bool bPrevPinkyPinch = false;
+	double LastQualityModeChangeTime = -1000.0;
+
 	// Per-hand committed pinch point (thumb-index midpoint) in world space, and
 	// whether that hand is currently pinching. Returns false if untracked.
 	bool GetHandPinch(const UHandTrackingComponent* Hand, FVector& OutPoint) const;

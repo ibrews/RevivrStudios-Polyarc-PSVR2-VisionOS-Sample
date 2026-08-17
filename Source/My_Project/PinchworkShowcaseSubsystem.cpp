@@ -46,6 +46,7 @@ void UPinchworkShowcaseSubsystem::Tick(float DeltaTime)
 	UpdateTwoHand(DeltaTime);
 	UpdateMacro();
 	UpdateAlphaModeCycler();
+	UpdateQualityModeCycler();
 	DrawHud();
 }
 
@@ -82,6 +83,25 @@ namespace
 			CVar->Set(Value, ECVF_SetByConsole);
 		}
 	}
+
+	struct FQualityMode
+	{
+		const TCHAR* Name;
+		int32 ShadowQuality;  // r.ShadowQuality (0=off .. 5=max)
+		int32 Nanite;         // r.Nanite (0/1)
+		int32 AntiAliasing;   // r.Mobile.AntiAliasing (0=off,1=FXAA,2=TAA,3=MSAA,4=TSR,5=SMAA)
+	};
+
+	// Mode 0 matches the shipping default so the app starts in its normal state.
+	static const FQualityMode GQualityModes[] = {
+		{ TEXT("0 shadow=5 nanite=ON  aa=FXAA (current default)"), 5, 1, 1 },
+		{ TEXT("1 shadow=1 nanite=ON  aa=FXAA (low shadow)"),      1, 1, 1 },
+		{ TEXT("2 shadow=0 nanite=ON  aa=FXAA (shadows OFF)"),     0, 1, 1 },
+		{ TEXT("3 shadow=5 nanite=off aa=FXAA (Nanite OFF)"),      5, 0, 1 },
+		{ TEXT("4 shadow=5 nanite=ON  aa=MSAA"),                   5, 1, 3 },
+		{ TEXT("5 shadow=5 nanite=ON  aa=TAA"),                    5, 1, 2 },
+	};
+	static constexpr int32 GNumQualityModes = UE_ARRAY_COUNT(GQualityModes);
 }
 
 void UPinchworkShowcaseSubsystem::ApplyAlphaMode(int32 Mode)
@@ -109,6 +129,32 @@ void UPinchworkShowcaseSubsystem::UpdateAlphaModeCycler()
 		ApplyAlphaMode(AlphaMode);
 	}
 	bPrevRingPinch = bRing;
+}
+
+void UPinchworkShowcaseSubsystem::ApplyQualityMode(int32 Mode)
+{
+	const FQualityMode& M = GQualityModes[FMath::Clamp(Mode, 0, GNumQualityModes - 1)];
+	SetCVarInt(TEXT("r.ShadowQuality"), M.ShadowQuality);
+	SetCVarInt(TEXT("r.Nanite"), M.Nanite);
+	SetCVarInt(TEXT("r.Mobile.AntiAliasing"), M.AntiAliasing);
+	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] -> %s"), M.Name);
+	if (GLog) { GLog->Flush(); }   // forced flush: this log is the record of what was on screen
+}
+
+void UPinchworkShowcaseSubsystem::UpdateQualityModeCycler()
+{
+	const bool bPinky =
+		(LeftHand.IsValid()  && LeftHand->bIsPinkyPinching) ||
+		(RightHand.IsValid() && RightHand->bIsPinkyPinching);
+
+	const double Now = FPlatformTime::Seconds();
+	if (bPinky && !bPrevPinkyPinch && (Now - LastQualityModeChangeTime) > 0.5)
+	{
+		LastQualityModeChangeTime = Now;
+		QualityMode = (QualityMode + 1) % GNumQualityModes;
+		ApplyQualityMode(QualityMode);
+	}
+	bPrevPinkyPinch = bPinky;
 }
 
 bool UPinchworkShowcaseSubsystem::TryWire()
@@ -310,4 +356,8 @@ void UPinchworkShowcaseSubsystem::DrawHud()
 	// Yellow because it is debug state, not normal app state - it should look temporary.
 	GEngine->AddOnScreenDebugMessage(9102, 0.f, FColor::Yellow,
 		FString::Printf(TEXT("ALPHA MODE (ring-thumb pinch to cycle): %s"), GAlphaModes[AlphaMode].Name));
+
+	// Quality-mode cycler readout, distinct key so it renders as its own line.
+	GEngine->AddOnScreenDebugMessage(9103, 0.f, FColor::Green,
+		FString::Printf(TEXT("QUALITY MODE (pinky-pinch to cycle): %s"), GQualityModes[QualityMode].Name));
 }
