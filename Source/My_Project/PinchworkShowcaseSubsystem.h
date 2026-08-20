@@ -82,6 +82,15 @@ private:
 	FVisionProAutoCycler AutoCycler;
 	bool bAutoCyclerInitialized = false;
 
+	// --- Numeric alpha/premultiplication readback (D1) ---
+	// Drives FVisionProAlphaProbe::CaptureAndLog(). This exists because the probe was previously
+	// compiled into the binary with ZERO call sites -- it could never emit anything, while being
+	// described as the thing that settles D1. Instrumentation that is never invoked is worse than
+	// no instrumentation, because it reads as coverage.
+	// Off by default: r.VisionOS.AlphaProbe.Interval (seconds) or r.VisionOS.AlphaProbe.Once.
+	void UpdateAlphaProbe(float DeltaTime);
+	double AlphaProbeElapsed = 0.0;
+
 	int32 QualityMode = 0;
 	bool bPrevPinkyPinch = false;
 	double LastQualityModeChangeTime = -1000.0;

@@ -19,6 +19,7 @@
 #include "HAL/IConsoleManager.h"   // alpha-mode cycler sets render cvars at runtime
 #include "RHIShaderPlatform.h"     // GMaxRHIShaderPlatform -- render-config HUD diagnostic
 #include "VisionProAutoCycler.h"   // timer-driven mode stepping with measured per-mode stats
+#include "VisionProAlphaProbe.h"   // numeric alpha/premultiplication readback — D1
 #include "DataDrivenShaderPlatformInfo.h"  // FDataDrivenShaderPlatformInfo::GetName
 #include "RenderUtils.h"           // IsForwardShadingEnabled
 #include "VisionProGPUDetection.h" // runtime M2-vs-M5 GPU tier (Apple8 vs Apple9+)
@@ -43,6 +44,11 @@ void UPinchworkShowcaseSubsystem::Tick(float DeltaTime)
 	// behind hand wiring would make a headset-on-the-desk or hands-down session silently produce no
 	// data, which is exactly the failure it exists to prevent.
 	UpdateAutoCycler(DeltaTime);
+
+	// Same reasoning as the auto-cycler above: the alpha readback must not be gated behind hand
+	// wiring. D1 is about what the compositor receives, which has nothing to do with whether hand
+	// tracking resolved.
+	UpdateAlphaProbe(DeltaTime);
 
 	if (!bWired)
 	{
@@ -151,6 +157,52 @@ void UPinchworkShowcaseSubsystem::ApplyQualityMode(int32 Mode)
 	SetCVarInt(TEXT("r.Mobile.AntiAliasing"), M.AntiAliasing);
 	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] -> %s"), M.Name);
 	if (GLog) { GLog->Flush(); }   // forced flush: this log is the record of what was on screen
+}
+
+// Alpha probe cadence. Off by default because CaptureAndLog() does a full-frame readback with an
+// RHI flush -- fine for a diagnostic build, not something to run unconditionally.
+//   r.VisionOS.AlphaProbe.Interval  seconds between captures (0 = off)
+//   r.VisionOS.AlphaProbe.Once      set to 1 to fire a single capture, auto-clears
+static TAutoConsoleVariable<float> CVarAlphaProbeInterval(
+	TEXT("r.VisionOS.AlphaProbe.Interval"),
+	0.0f,
+	TEXT("Seconds between [ALPHAPROBE] captures. 0 disables. Each capture stalls the GPU."),
+	ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarAlphaProbeOnce(
+	TEXT("r.VisionOS.AlphaProbe.Once"),
+	0,
+	TEXT("Set to 1 to fire one [ALPHAPROBE] capture. Auto-clears back to 0."),
+	ECVF_Default);
+
+void UPinchworkShowcaseSubsystem::UpdateAlphaProbe(float DeltaTime)
+{
+	// A one-shot request always wins, and clears itself so a stuck cvar cannot pin the GPU in a
+	// readback stall every frame.
+	if (CVarAlphaProbeOnce.GetValueOnGameThread() != 0)
+	{
+		CVarAlphaProbeOnce->Set(0, ECVF_SetByCode);
+		FVisionProAlphaProbe::CaptureAndLog();
+		AlphaProbeElapsed = 0.0;
+		return;
+	}
+
+	const float Interval = CVarAlphaProbeInterval.GetValueOnGameThread();
+	if (Interval <= 0.0f)
+	{
+		AlphaProbeElapsed = 0.0;
+		return;
+	}
+
+	// Skip the first few seconds: the readback is only meaningful once the scene is actually
+	// rendering, and a capture during startup would measure a cleared or partially-composed frame
+	// and report it as if it were representative.
+	AlphaProbeElapsed += DeltaTime;
+	if (AlphaProbeElapsed >= Interval)
+	{
+		AlphaProbeElapsed = 0.0;
+		FVisionProAlphaProbe::CaptureAndLog();
+	}
 }
 
 void UPinchworkShowcaseSubsystem::UpdateAutoCycler(float DeltaTime)
