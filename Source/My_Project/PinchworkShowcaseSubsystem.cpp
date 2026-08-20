@@ -17,6 +17,10 @@
 #include "Engine/Engine.h"
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"   // alpha-mode cycler sets render cvars at runtime
+#include "RHIShaderPlatform.h"     // GMaxRHIShaderPlatform -- render-config HUD diagnostic
+#include "DataDrivenShaderPlatformInfo.h"  // FDataDrivenShaderPlatformInfo::GetName
+#include "RenderUtils.h"           // IsForwardShadingEnabled
+#include "VisionProGPUDetection.h" // runtime M2-vs-M5 GPU tier (Apple8 vs Apple9+)
 
 DEFINE_LOG_CATEGORY_STATIC(LogPinchworkShowcase, Log, All);
 
@@ -360,4 +364,19 @@ void UPinchworkShowcaseSubsystem::DrawHud()
 	// Quality-mode cycler readout, distinct key so it renders as its own line.
 	GEngine->AddOnScreenDebugMessage(9103, 0.f, FColor::Green,
 		FString::Printf(TEXT("QUALITY MODE (pinky-pinch to cycle): %s"), GQualityModes[QualityMode].Name));
+
+	// Render-config diagnostic: what's actually running, without a log pull. Alex asked on-device
+	// "are we still in deferred rendering, is SM6 on" -- this answers that live.
+	{
+		const FStaticShaderPlatform Platform = GMaxRHIShaderPlatform;
+		const FString PlatformName = FDataDrivenShaderPlatformInfo::GetName(Platform).ToString();
+		const bool bForward = IsForwardShadingEnabled(Platform);
+		const bool bSM6 = PlatformName.Contains(TEXT("SM6"));
+		GEngine->AddOnScreenDebugMessage(9104, 0.f, FColor::Orange,
+			FString::Printf(TEXT("RENDER: platform=%s  %s  SM6=%s  GPU=%s"),
+				*PlatformName,
+				bForward ? TEXT("FORWARD") : TEXT("DEFERRED"),
+				bSM6 ? TEXT("ON") : TEXT("off"),
+				*UVisionProGPUDetection::GetGPUTierDisplayString()));
+	}
 }

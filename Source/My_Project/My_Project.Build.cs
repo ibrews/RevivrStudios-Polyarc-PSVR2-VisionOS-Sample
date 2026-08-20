@@ -12,6 +12,22 @@ public class My_Project : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "XRBase", "EnhancedInput", "HeadMountedDisplay" });
 
+		// RHI + RenderCore: on-screen render-config diagnostic (shader platform / forward-vs-
+		// deferred / SM6 status) in PinchworkShowcaseSubsystem -- so this is visible directly on
+		// device instead of needing a log pull each time. See GMaxRHIShaderPlatform (RHI) and
+		// IsForwardShadingEnabled (RenderCore).
+		PrivateDependencyModuleNames.AddRange(new string[] { "RHI", "RenderCore" });
+
+		// Metal: VisionProGPUDetection.mm queries MTLDevice supportsFamily directly for runtime
+		// GPU-tier detection (M2/Apple8 vs M5/Apple9+), matching the engine's own SM6 hardware gate
+		// at MetalRHI.cpp:258-265. Capability-based rather than a device-model lookup table, so it
+		// stays correct for hardware released after this code was written.
+		if (Target.Platform == UnrealTargetPlatform.IOS || Target.Platform == UnrealTargetPlatform.VisionOS
+			|| Target.Platform == UnrealTargetPlatform.Mac)
+		{
+			PublicWeakFrameworks.Add("Metal");
+		}
+
 		// Hand-tracking gameplay was extracted into the Pinchwork plugin (own repo,
 		// sold standalone). The VRPawn adds Pinchwork's components, so the project
 		// depends on the plugin module. PinchworkCore is the engine-agnostic math
