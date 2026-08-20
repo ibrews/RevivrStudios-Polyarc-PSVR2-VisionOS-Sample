@@ -23,6 +23,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "Pinchwork/PinchworkTwoHand.h"
 #include "Pinchwork/PinchworkSequence.h"
+#include "VisionProAutoCycler.h"   // FVisionProAutoCycler is a by-value member below
 #include "PinchworkShowcaseSubsystem.generated.h"
 
 class UHandTrackingComponent;
@@ -69,6 +70,17 @@ private:
 	// cannot be cycled this way; they need a separate build.
 	void UpdateQualityModeCycler();
 	void ApplyQualityMode(int32 Mode);
+
+	// --- Timer-driven auto-cycler (no gesture required) ---
+	// The pinch cyclers above need a wearer who knows the gesture and reports what they saw. This
+	// one steps the SAME quality modes on a timer and writes measured per-mode statistics to the log
+	// ([AUTOCYCLE] blocks: frame ms avg/min/max/p95, fps, game/render/GPU ms, draw calls, primitives,
+	// thermal state). Off by default; enable with r.VisionOS.AutoCycle 1. Ticked before the hand
+	// wiring so it runs with hands down or out of view.
+	void UpdateAutoCycler(float DeltaTime);
+
+	FVisionProAutoCycler AutoCycler;
+	bool bAutoCyclerInitialized = false;
 
 	int32 QualityMode = 0;
 	bool bPrevPinkyPinch = false;

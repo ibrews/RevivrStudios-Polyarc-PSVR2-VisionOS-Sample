@@ -18,6 +18,7 @@
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"   // alpha-mode cycler sets render cvars at runtime
 #include "RHIShaderPlatform.h"     // GMaxRHIShaderPlatform -- render-config HUD diagnostic
+#include "VisionProAutoCycler.h"   // timer-driven mode stepping with measured per-mode stats
 #include "DataDrivenShaderPlatformInfo.h"  // FDataDrivenShaderPlatformInfo::GetName
 #include "RenderUtils.h"           // IsForwardShadingEnabled
 #include "VisionProGPUDetection.h" // runtime M2-vs-M5 GPU tier (Apple8 vs Apple9+)
@@ -36,6 +37,13 @@ bool UPinchworkShowcaseSubsystem::DoesSupportWorldType(const EWorldType::Type Wo
 
 void UPinchworkShowcaseSubsystem::Tick(float DeltaTime)
 {
+	// Timer-driven auto-cycler. Deliberately ticked BEFORE the wiring checks below: those return
+	// early when hand tracking has not resolved, and the entire point of the auto-cycler is that the
+	// wearer does nothing at all -- no pinch, no gesture, hands possibly not even in view. Gating it
+	// behind hand wiring would make a headset-on-the-desk or hands-down session silently produce no
+	// data, which is exactly the failure it exists to prevent.
+	UpdateAutoCycler(DeltaTime);
+
 	if (!bWired)
 	{
 		if (!TryWire()) { return; }
@@ -143,6 +151,29 @@ void UPinchworkShowcaseSubsystem::ApplyQualityMode(int32 Mode)
 	SetCVarInt(TEXT("r.Mobile.AntiAliasing"), M.AntiAliasing);
 	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] -> %s"), M.Name);
 	if (GLog) { GLog->Flush(); }   // forced flush: this log is the record of what was on screen
+}
+
+void UPinchworkShowcaseSubsystem::UpdateAutoCycler(float DeltaTime)
+{
+	// Bind once, lazily. Drives the SAME GQualityModes table the pinch cycler uses, so the two can
+	// never disagree about what "mode 3" means -- a mismatch there would silently mislabel every
+	// measurement in the pulled log.
+	if (!bAutoCyclerInitialized)
+	{
+		bAutoCyclerInitialized = true;
+		AutoCycler.Initialize(TEXT("quality"), GNumQualityModes,
+			FVisionProAutoCycler::FApplyModeDelegate::CreateLambda(
+				[this](int32 ModeIndex, FString& OutModeName)
+				{
+					ApplyQualityMode(ModeIndex);
+					OutModeName = GQualityModes[FMath::Clamp(ModeIndex, 0, GNumQualityModes - 1)].Name;
+					// Keep the pinch cycler's index in sync so a wearer who pinches mid-run steps
+					// from where the auto-cycler actually is, not from a stale index.
+					QualityMode = ModeIndex;
+				}));
+	}
+
+	AutoCycler.Tick(DeltaTime);
 }
 
 void UPinchworkShowcaseSubsystem::UpdateQualityModeCycler()
