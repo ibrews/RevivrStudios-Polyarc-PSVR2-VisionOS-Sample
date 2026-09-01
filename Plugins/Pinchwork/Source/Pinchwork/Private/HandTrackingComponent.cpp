@@ -58,6 +58,28 @@ static TAutoConsoleVariable<float> CVarGunAutoFireInterval(TEXT("r.Gun.AutoFireI
 static int32 GHeldGrabCount = 0;             // # actors grabbed across both hands (0 => hands free)
 static int32 GTranslucentDepthTestIndex = 0; // current slot in the depth-fixup A/B cycle
 
+// @AGILELENS 2026-08-31 - real-hand (passthrough) visibility. UE's own launch-time path
+// (LaunchIOS.cpp, reading VisionOSRuntimeSettings.UpperLimbVisibility from ini) was confirmed
+// empirically absent from BOTH the vanilla and fork packaged/staged configs -- neither build's
+// cooked app bundle contains the key at all, so both were silently falling back to whatever
+// default is compiled into the Launch module rather than the value the .ini author intended. This
+// calls the same native bridge function directly from game code instead of trusting the ini path.
+// ConfigureImmersiveSpace is declared in a PRIVATE engine header
+// (Runtime/Launch/Private/Apple/SwiftMainBridge.h) not includable by a plugin module, so the
+// namespace+signature is forward-declared here to match it exactly (Launch is always linked into
+// the executable, so no new Build.cs dependency is needed) -- same "grep the exact engine symbol"
+// style as VisionProCapabilityReport.mm's RHI globals list.
+#if PLATFORM_VISIONOS
+namespace UE::SwiftMainBridgeNS
+{
+	void ConfigureImmersiveSpace(int32 InImmersiveStyle, int32 InUpperLimbVisibility);
+}
+#endif
+// UpperLimbVisibility values per VisionOSRuntimeSettings: 0 = Hidden, 1 = Visible, 2 = Automatic.
+// ImmersiveStyle is left at 1 (Mixed) to match Config/VisionOS/VisionOSEngine.ini's ImmersiveStyle=1
+// -- this call only ever changes the upper-limb-visibility argument, never the immersive style.
+static bool GRealHandsVisible = false; // current toggle state; starts Hidden to match intended default
+
 // Held-gun grip ORIENTATION as an index into the 24 axis-aligned orientations, instead of guessing
 // Euler angles for the mesh's unknown native axes. A ring-thumb pinch on the FREE hand steps it (the
 // holding hand's thumb is busy with the index-thumb grip), the gun snaps to it live, and the index is
@@ -273,6 +295,16 @@ void UHandTrackingComponent::BeginPlay()
 	{
 		PlaySceneLoadSound();
 	}
+
+	// Force real-hand (passthrough) visibility explicitly, once per level load (left instance
+	// only, same gate as the scene-load sting above — VRPawn always carries exactly one of each).
+	// See the GRealHandsVisible comment above for why this doesn't just rely on the ini value.
+#if PLATFORM_VISIONOS
+	if (!bIsRight)
+	{
+		UE::SwiftMainBridgeNS::ConfigureImmersiveSpace(1 /*Mixed*/, GRealHandsVisible ? 1 : 0);
+	}
+#endif
 }
 
 void UHandTrackingComponent::EnsureInstancesInitialized()
@@ -1107,6 +1139,14 @@ void UHandTrackingComponent::UpdateMiddlePinchState(const FTransform& ThumbTipWo
 	{
 		bIsMiddlePinching = true;
 		OnMiddlePinchStarted.Broadcast(GetSide());
+
+		// @AGILELENS 2026-08-31 - middle-thumb pinch (either hand) toggles real-hand passthrough
+		// visibility live, on/off/on. Middle-pinch had no game-logic consumer before this (only the
+		// generic OnMiddlePinchStarted/Ended Blueprint events); ring is already the depth/gun-orient
+		// cycler and pinky is already level-travel, so this is the first free thumb-pinch slot.
+		// Same rising-edge-only pattern as UpdateRingPinchState's depth cycler. Shared with the
+		// Blueprint-callable ToggleRealHandVisibility() below so a UI button can drive the same state.
+		UHandTrackingComponent::ToggleRealHandVisibility();
 	}
 	else if (bIsMiddlePinching && DistanceCm >= ExitCm)
 	{
@@ -1640,6 +1680,25 @@ FTransform UHandTrackingComponent::GetKeypointWorldTransform(EHandKeypoint Keypo
 		return CachedKeypoints[Index];
 	}
 	return FTransform::Identity;
+}
+
+void UHandTrackingComponent::ToggleRealHandVisibility()
+{
+#if PLATFORM_VISIONOS
+	GRealHandsVisible = !GRealHandsVisible;
+	UE::SwiftMainBridgeNS::ConfigureImmersiveSpace(1 /*Mixed*/, GRealHandsVisible ? 1 : 0);
+	const FString HandsMsg = FString::Printf(TEXT("[RealHands] %s"), GRealHandsVisible ? TEXT("VISIBLE") : TEXT("HIDDEN"));
+	UE_LOG(LogTemp, Warning, TEXT("%s"), *HandsMsg);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(7789, 3.0f, GRealHandsVisible ? FColor::Green : FColor::Orange, HandsMsg);
+	}
+#endif
+}
+
+bool UHandTrackingComponent::AreRealHandsVisible()
+{
+	return GRealHandsVisible;
 }
 
 bool UHandTrackingComponent::IsInLevelB() const

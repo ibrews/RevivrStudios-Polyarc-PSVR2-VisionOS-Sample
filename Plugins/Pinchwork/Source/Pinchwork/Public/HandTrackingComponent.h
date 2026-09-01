@@ -338,6 +338,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Hand Tracking")
 	bool IsTracking() const { return bIsTracking; }
 
+	// Toggle real-hand (passthrough) visibility live. Also triggered by a middle-thumb pinch on
+	// either hand (see UpdateMiddlePinchState) — exposed here too so a UI button/widget can drive
+	// it directly instead of (or alongside) the gesture, e.g. wired to a menu button the way
+	// Cascade Countdown's HANDS panel toggles real-arm visibility.
+	UFUNCTION(BlueprintCallable, Category = "Hand Tracking")
+	static void ToggleRealHandVisibility();
+
+	// Current real-hand visibility state (true = visible/passthrough, false = hidden).
+	UFUNCTION(BlueprintPure, Category = "Hand Tracking")
+	static bool AreRealHandsVisible();
+
 	// TEST: a pinky-to-thumb pinch toggles between Level A and Level B so you can
 	// exercise OpenLevel world-teardown→load on-device in real time. Either hand
 	// triggers it; a process-wide guard prevents a double-trigger mid-teardown.
