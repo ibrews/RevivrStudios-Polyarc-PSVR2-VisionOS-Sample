@@ -18,7 +18,7 @@
 	<key>UIFileSharingEnabled</key>
 	<false/>
 	<key>CFBundleDisplayName</key>
-	<string>Pinchwork</string>
+	<string>Pinchwork SM5 Baseline</string>
 	<key>UIRequiresFullScreen</key>
 	<true/>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
@@ -35,8 +35,27 @@
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSAppTransportSecurity</key>
+		<dict>
+			<key>NSAllowsArbitraryLoads</key><true/>
+			<key>NSAllowsArbitraryLoadsInWebContent</key><true/>
+			<key>NSAllowsLocalNetworking</key><true/>
+			<key>NSExceptionDomains</key>
+			<dict>
+				<key>169.245.0.0/16</key>
+				<dict>
+					<key>NSIncludesSubdomains</key><true/>
+					<key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
+				</dict>
+			</dict>
+		</dict>
 	<key>TVTopShelfImage</key>
 	<dict>
 		<key>TVTopShelfPrimaryImageWide</key>

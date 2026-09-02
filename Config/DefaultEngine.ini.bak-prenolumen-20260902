@@ -24,22 +24,6 @@ GameDefaultMap=/Game/VRTemplate/Maps/VRTemplateMap.VRTemplateMap
 ; ES3_1 mobile path every other build (B9/B10/OfficeShowcase/vr58lab) uses. Deferred is a hard
 ; requirement for Lumen.
 r.ForwardShading=False
-
-; @AGILELENS 2026-09-02 — shadow quality under Lumen.
-; Under Lumen the scene's BAKED/stationary lights behave dynamically, so an all-baked-lighting scene
-; suddenly needs real-time shadows it was never authored for -> blocky CSM.
-; Virtual Shadow Maps are NOT an option here: DoesPlatformSupportVirtualShadowMaps() returns
-; bIsProjectEnable && DoesPlatformSupportNanite(), and Nanite is unsupported on METAL_SM5_IOS.
-; Forcing r.Shadow.Virtual.Enable=1 would request shaders that were never cooked — the exact crash
-; class already hit with Lumen's distance-field shaders. So: improve CSM instead.
-; @AGILELENS 2026-09-02: shadow-quality bump REMOVED (was ShadowQuality=5, 4096 maps, 4 cascades,
-; DistanceScale 1.5). It is a large shadow-atlas ask on a mobile GPU and coincided with the app
-; ceasing to advance past frame 0. Reverting to engine/scalability defaults.
-; NOTE for whoever revisits blocky shadows: the stereo ensure
-;   'DependentView == nullptr || DependentView == &View' in UseShadowStencilCulling
-; is PRE-EXISTING and BENIGN -- it fires once per run in builds that render thousands of frames
-; happily. Do not chase it as the cause of a hang; it was in every log back to the first
-; working Lumen build.
 r.MobileHDR=False
 vr.MobileMultiView=True
 vr.InstancedStereo=True
@@ -63,50 +47,11 @@ r.DefaultFeature.LocalExposure.ShadowContrastScale=0.8
 r.DefaultFeature.LocalExposure.ShadowContrastScale=0.8
 r.DefaultFeature.LocalExposure.ShadowContrastScale=0.8
 
-; @AGILELENS 2026-09-02 (SM5+Lumen device crash fix): the iOS platform baseline
-; (Engine/Config/IOS/BaseIOSEngine.ini:12) sets r.DistanceFields=0, which VisionOS inherits — so
-; FLumenSceneDirectLightingTraceDistanceFieldShadowsCS is NEVER COOKED (0 occurrences in either cook
-; log). But r.DistanceFieldShadowing defaults to 1, so Lumen's direct-lighting path still takes the
-; distance-field branch at runtime and calls GetShader<...TraceDistanceFieldShadowsCS>() on a shader
-; that does not exist -> hard crash 76ms after "Engine is initialized", inside
-; RenderDirectLightingForLumenScene -> TraceDistanceFieldShadows.
-; This is the SAME defect class as the r.ForwardShading cook/runtime mismatch fixed earlier tonight:
-; a setting the COOK sees differs from what the RUNTIME asks for. Aligning the runtime to the cook.
-; DURABLE FIX (engine-level, not done here): Lumen's DF-shadow consumer should gate on
-; DoesPlatformSupportDistanceFields()/r.DistanceFields the same way its ShouldCompilePermutation does.
-; 2026-09-02 REVISED: r.DistanceFieldShadowing=0 was NOT sufficient. Guarding the DF-shadow shader
-; only moved the crash to FRadianceCacheTraceFromProbesCS (Lumen radiance-cache SOFTWARE ray
-; tracing), which also needs distance fields. Lumen's final gather requires EITHER hardware ray
-; tracing OR distance fields, and METAL_SM5_IOS has neither -- so guarding shaders one at a time is
-; whack-a-mole. Enabling distance fields for this platform is the structural fix: it makes the
-; shaders actually cook, satisfying every consumer instead of suppressing them one by one.
-; The iOS baseline (Engine/Config/IOS/BaseIOSEngine.ini:12) sets r.DistanceFields=0 and VisionOS
-; inherits it; this overrides that for this project.
-r.DistanceFields=1
-r.DistanceFieldShadowing=1
 r.GenerateMeshDistanceFields=True
 
-r.DynamicGlobalIlluminationMethod=1
+r.DynamicGlobalIlluminationMethod=0
 
-r.ReflectionMethod=1
-
-; @AGILELENS 2026-09-02 — LUMEN LITE (UE 5.8's medium-quality GI).
-; r.Lumen.FinalGatherMethod, per the cvar's OWN help text in Lumen.cpp:
-;   0 = Irradiance Field Gather  -- "Faster but lower quality GI. Targeted at mid range PC and Switch 2"
-;   1 = Screen Probe Gather      -- "Higher quality GI"  (engine DEFAULT, what we were running)
-; NOTE the cvar numbering is INVERTED relative to the internal ELumenFinalGatherMethod enum
-; (ScreenProbeGather=0, IrradianceFieldGather=1). UseIrradianceFieldGather() correctly tests the
-; CVAR == 0. Do not "fix" that comparison -- it looks wrong and is right.
-; WHY: measured on the M5, GPU/LumenScreenProbeGather was 14.8ms = ~55% of the entire GPU frame,
-; while GPU/LumenIrradianceFieldGather ran on 0 frames. Epic bills Lite as roughly 2x faster.
-; BISECT 2026-09-02 (my call, not a reviewed decision): with this at 0 (Lumen Lite) the app died
-; ~1s after 'Engine is initialized'. The cook log contained ZERO IrradianceField shader compiles --
-; the same 'uncooked shader' signature as the Lumen distance-field crash fixed earlier today.
-; Reverting to 1 (Screen Probe Gather, the engine default) to isolate the variable, since that is
-; the value the long-running 900-frame captures used.
-; To retry Lumen Lite: set 0 AND first verify irradiance-field shaders actually cook for
-; METAL_SM5_IOS -- an empty grep in the cook log is the warning sign, not a clean bill of health.
-r.Lumen.FinalGatherMethod=1
+r.ReflectionMethod=0
 r.Mobile.AntiAliasing=3
 r.AntiAliasingMethod=3
 ; TRUE = baked/static lighting enabled. UnrealLightmass was ported to native arm64 in the engine
@@ -212,7 +157,7 @@ AdditionalPlistData=<key>NSHandsTrackingUsageDescription</key><string>Track your
 ; -- both showed as the same icon label on-device, distinguishable only by version number (flagged
 ; by night-manager peer session). Bundle ID (com.acp.MyProject) was already distinct from vanilla's
 ; com.acp.vanilla.MyProject; this is the separate key for the home-screen label itself.
-BundleDisplayName=Pinchwork SM5 Lumen
+BundleDisplayName=Pinchwork OQ B10
 BundleName=Pinchwork
 
 [/Script/MacTargetPlatform.XcodeProjectSettings]
@@ -223,12 +168,7 @@ bUseAutomaticCodeSigning=True
 ; UE_PRODUCT_NAME_STRIPPED is hard-derived from the .uproject filename (My_Project -> MyProject),
 ; not independently configurable, so the achievable bundle ID here is com.acp.MyProject, not a
 ; fully custom string — getting the literal "com.acp.pinchwork" would require renaming the project.
-; @AGILELENS 2026-09-02 (NoLumen control): the display name was changed to "Pinchwork SM5 NoLumen"
-; in Build/IOS/UBTGenerated/Info.Template.plist, but THIS line was left at pinchworkoqb10 — which
-; would have produced com.agilelens.pinchworkoqb10.MyProject and OVERWRITTEN THE B10 CONTROL on the
-; M5. Display name and bundle identity are set in two different places on this codepath; changing
-; one is not changing the other. Always verify the packaged .app's CFBundleIdentifier before install.
-CodeSigningPrefix=com.agilelens.pinchworksm5lumen
+CodeSigningPrefix=com.agilelens.pinchworkoqb10
 CodeSigningTeam=C624J4S2F8
 
 [/Script/PythonScriptPlugin.PythonScriptPluginSettings]

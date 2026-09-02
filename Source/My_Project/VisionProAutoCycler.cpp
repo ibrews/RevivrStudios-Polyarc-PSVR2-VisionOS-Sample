@@ -41,21 +41,17 @@ void FVisionProAutoCycler::Initialize(const TCHAR* InCyclerName, int32 InNumMode
 
 int32 FVisionProAutoCycler::ReadThermalState()
 {
-	// EDeviceThermalState: Unsupported=-1, None=0, Light=1, Moderate=2, Severe=3+ (throttling).
-	// On Apple platforms this maps NSProcessInfoThermalState onto the first four values, which is
-	// exactly the signal needed for the "does it hold up over minutes" question -- a mode that is
-	// fast for 10s and Severe by minute 3 is not a shippable mode.
-	return static_cast<int32>(FPlatformMisc::GetDeviceThermalState());
+	// iOS/visionOS maps NSProcessInfoThermalState to FCoreDelegates::ETemperatureSeverity here.
+	// This is the signal needed for the "does it hold up over minutes" question -- a mode that is
+	// fast for 10s and Critical by minute 3 is not a shippable mode.
+	return static_cast<int32>(FPlatformMisc::GetDeviceTemperatureLevel());
 }
 
 float FVisionProAutoCycler::ReadDeviceTemperature()
 {
-	// VERIFIED 2026-08-20: FIOSPlatformMisc overrides GetDeviceThermalState() (IOSPlatformMisc.h:62)
-	// but does NOT override GetDeviceTemperature(), so on visionOS this falls through to the generic
-	// implementation and will almost certainly read -1.0 ("unsupported", GenericPlatformMisc.h:1567-1575).
-	// That is reported VERBATIM rather than substituted or hidden: -1.0 must read as "no probe", never
-	// as a cold device. The thermal STATE above is the signal that actually works on this platform.
-	return FPlatformMisc::GetDeviceTemperature();
+	// The platform API exposes thermal severity, not a Celsius probe. Report unsupported verbatim;
+	// -1.0 must read as "no probe", never as a cold device.
+	return -1.0f;
 }
 
 void FVisionProAutoCycler::BeginMode(int32 ModeIndex)

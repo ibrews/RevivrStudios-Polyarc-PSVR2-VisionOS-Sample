@@ -470,7 +470,7 @@ namespace
 		// every RHIGetRuntimeBindless* helper in RHI.h:628-644 is UE_DEPRECATED in 5.8 and now
 		// returns Disabled unconditionally -- calling one of those would have produced a
 		// confident, permanently-wrong `0`.
-		EmitBool(TEXT("rhi_supports_bindless"), GRHIGlobals.bSupportsBindless);
+		EmitBool(TEXT("rhi_supports_bindless"), GRHIBindlessSupport != ERHIBindlessSupport::Unsupported);
 
 		EmitBool(TEXT("rhi_supports_raytracing"), GRHISupportsRayTracing);
 		EmitBool(TEXT("rhi_supports_mesh_shaders_tier0"), GRHISupportsMeshShadersTier0);

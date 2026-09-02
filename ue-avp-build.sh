@@ -13,6 +13,14 @@
 #
 # Drop into a UE visionOS project root; edit CONFIG (or a sibling ue-avp-build.config). Canonical copy lives in the
 # KB (intelligence/techniques/scripts/). Design + rationale: intelligence/techniques/ue-visionos-sim-device-build-flow.md
+#
+# Self-monitoring (added 2026-08-28, see preventing-wasted-build-cycles-on-shared-ue-machines.md): sim/device
+# runs self-log to a deterministic path, get a post-BuildCookRun cross-check against
+# ue-build-log-status.sh (catches "BuildCookRun's own exit code said success but the log secretly shows
+# Result: Failed" -- the exact class of bug from that incident), and text a PASS/FAIL verdict via fleet_bus.py
+# on exit -- so an invoking session no longer has to remember to poll or watch compile lines scroll. A
+# format mismatch in the log check (exit 2, INCOMPLETE) never fails a build on its own -- only an EXPLICIT
+# FAIL marker (exit 1) does; the check can only add a true positive, never a false one.
 set -euo pipefail
 
 # ---------- CONFIG (override via env or a sibling ue-avp-build.config) ----------
@@ -32,37 +40,103 @@ UAT="$UE_ROOT/Engine/Build/BatchFiles/RunUAT.sh"
 export NuGetAudit=false   # clean-machine: Magick.NET 14.10.2 NU1902 is treated as a build error otherwise (KB gotcha)
 STAGE_DIR="$(dirname "$PROJECT")/Saved/StagedBuilds/VisionOS"
 
+MODE="${1:-help}"
+SCRIPT_START="$(date +%s)"
+KB_SCRIPTS="$HOME/knowledge/scripts"
+STATUS_SCRIPT="$KB_SCRIPTS/ue-build-log-status.sh"
+FLEET_BUS="$HOME/knowledge/departments/engineering/fleet-tools/fleet_bus.py"
+LOGFILE=""   # set by start_monitoring; empty means "no self-log for this invocation" (e.g. help)
+
+# Self-log this invocation's full output to a deterministic path via `tee`, so it's discoverable
+# regardless of whether the caller ALSO redirected output elsewhere -- and arm an EXIT trap that
+# reports the final PASS/FAIL/rc verdict via fleet-bus, so nobody has to remember to check back.
+# Only called for sim/device -- `help` needs none of this.
+start_monitoring() {
+  local logdir="$(dirname "$PROJECT")/Saved/BuildLogs"
+  mkdir -p "$logdir"
+  LOGFILE="$logdir/ue-avp-build-${MODE}-$(basename "$PROJECT" .uproject)-$$.log"
+  exec > >(tee -a "$LOGFILE") 2>&1
+  echo "[ue-avp-build] self-logging this $MODE run to $LOGFILE"
+  trap alert_on_exit EXIT
+}
+
+alert_on_exit() {
+  local rc=$?
+  local elapsed=$(( $(date +%s) - SCRIPT_START ))
+  local verdict="PASSED"
+  [ "$rc" -ne 0 ] && verdict="FAILED (rc=$rc)"
+  echo "[ue-avp-build] $MODE $verdict in ${elapsed}s. Log: $LOGFILE"
+  if [ -f "$FLEET_BUS" ]; then
+    python3 "$FLEET_BUS" send --to human --body "ue-avp-build.sh $MODE ($TARGET on $(hostname -s)): $verdict in ${elapsed}s. Log: $LOGFILE" >/dev/null 2>&1 || true
+  fi
+}
+
+# Cross-check BuildCookRun's own exit code against the log itself. `set -e` already aborts this
+# script if bcr returns nonzero -- this catches the OTHER class of bug (proven real earlier today):
+# UAT/UBT reporting success while the log secretly contains a terminal FAIL marker deeper in its
+# own output. Deliberately asymmetric: only an explicit FAIL (status-checker exit 1) hard-fails the
+# build; INCOMPLETE/unparseable (exit 2, e.g. a log-format mismatch) just logs a note and continues
+# -- a gap in this check's log-format coverage must never be able to fail a genuinely good build.
+verify_log_or_fail() {
+  [ -f "$STATUS_SCRIPT" ] || { echo "[ue-avp-build] NOTE: $STATUS_SCRIPT not found, skipping log cross-check"; return 0; }
+  set +e
+  bash "$STATUS_SCRIPT" "$LOGFILE" 1
+  local status_rc=$?
+  set -e
+  if [ "$status_rc" -eq 1 ]; then
+    echo "[ue-avp-build] BuildCookRun's own exit code said success, but ue-build-log-status.sh found an explicit FAIL marker in $LOGFILE -- treating this as a hard failure." >&2
+    exit 1
+  fi
+}
+
 bcr() {  # shared BuildCookRun — render config comes from the project's committed ini (the Mixed/Pinchwork config), UNTOUCHED
   "$UAT" BuildCookRun -project="$PROJECT" -target="$TARGET" -platform=VisionOS \
     -clientconfig="$CLIENTCONFIG" -build -cook -stage -pak -package -nop4 -unattended -nopause -utf8output "$@"
+  verify_log_or_fail
 }
 newest_app() { ls -dt "$STAGE_DIR"/*.app 2>/dev/null | head -1; }
 pick_sim() { [ -n "$SIM_UDID" ] && { echo "$SIM_UDID"; return; }
   xcrun simctl list devices visionOS available | grep -oE '\(([0-9A-F-]{36})\)' | tr -d '()' | head -1; }
 
-case "${1:-help}" in
+case "$MODE" in
   sim)
-    # Sim deltas (NONE are render config): arch=iossimulator + cook METAL_SIM shaders. The sim-shader flags are
-    # injected via -ini: AT BUILD TIME (not a file edit) so the committed config can stay lean for device cooks.
+    start_monitoring
+    # Sim deltas: arch=iossimulator + cook METAL_SIM shaders + MSAA OFF AT RUNTIME. Proven root cause
+    # (2026-07-05, rediscovered after a black-sim regression): on the sim's A8-level Metal (METAL_SIM), the
+    # MSAA color-resolve into the presented backbuffer silently drops when r.Mobile.AntiAliasing=3
+    # (device's value) — the scene draws, but never reaches the screen (visible stat overlay, black 3D).
+    # Proven+fixed once already (intelligence/techniques/ue-visionos-simulator-build-revival.md,
+    # 2026-06-07) but the fix never made it into this switcher.
+    #
+    # IMPORTANT: a cook-time `-ini:` override for this CVar does NOT work reliably — UE's incremental/
+    # iterative cooker only invalidates cached shader permutations when the physical ini FILE changes;
+    # a command-line -ini: override never touches the file, so an incremental cook silently keeps reusing
+    # shaders baked under the previous value (confirmed empirically 2026-07-05: a rebuild with the -ini:
+    # override still rendered black). The fix that actually works is forcing it as a RUNTIME startup
+    # console command (`-ExecCmds`), baked into the packaged app's uecommandline.txt post-package — this
+    # sidesteps cook/shader-cache invalidation entirely since it's just a live CVar set after launch.
     bcr -clientarchitecture=iossimulator \
       "-ini:Engine:[/Script/IOSRuntimeSettings.IOSRuntimeSettings]:bEnableSimulatorSupport=True" \
       "-ini:Engine:[/Script/IOSRuntimeSettings.IOSRuntimeSettings]:bSupportAppleA8=True"
     APP="$(newest_app)"; DEV="$(pick_sim)"; [ -z "$DEV" ] && { echo "no visionOS sim found"; exit 1; }
     BUNDLE_ID="${BUNDLE_ID:-$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist" 2>/dev/null)}"
+    # Force MSAA off at runtime (see note above) — patch uecommandline.txt and re-sign, no rebuild needed.
+    CMDLINE="$APP/uecommandline.txt"
+    if [ -f "$CMDLINE" ] && ! grep -q 'r.Mobile.AntiAliasing' "$CMDLINE"; then
+      sed -i '' 's/$/ -ExecCmds="r.Mobile.AntiAliasing 0"/' "$CMDLINE"
+      codesign --force --sign - --deep "$APP" >/dev/null 2>&1
+    fi
     xcrun simctl boot "$DEV" 2>/dev/null || true; open -a Simulator >/dev/null 2>&1 || true
     xcrun simctl terminate "$DEV" "$BUNDLE_ID" 2>/dev/null || true
     xcrun simctl install "$DEV" "$APP"
     xcrun simctl launch "$DEV" "$BUNDLE_ID"
     echo "→ launched $BUNDLE_ID in sim $DEV (Mixed/passthrough — same render config as device)" ;;
   device)
+    start_monitoring
     # Device = arm64 (no -clientarchitecture). Agile Lens signing. Immersive apps can't be remote-launched → tap.
     bcr "-ini:Engine:[/Script/MacTargetPlatform.XcodeProjectSettings]:CodeSigningTeam=$DEVICE_TEAM"
     APP="$(newest_app)"
-    # Filter to physical (not simulated) Vision Pro devices only, then extract the UUID by pattern —
-    # a plain `awk '{print $1}'` grabs the wrong field for any multi-word device name (e.g. the real
-    # "Agile Alex Apple Vision Pro") and doesn't distinguish real hardware from the many visionOS
-    # simulators devicectl also lists (2026-07-30 gotcha: picked a simulator's UUID by accident).
-    DEV_ID="${DEVICE_ID:-$(xcrun devicectl list devices --filter "Reality = 'physical' AND Name CONTAINS 'Vision'" --hide-headers 2>/dev/null | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1)}"
+    DEV_ID="${DEVICE_ID:-$(xcrun devicectl list devices 2>/dev/null | grep -i "vision" | grep -i "physical" | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1)}"
     echo "built (Agile Lens $DEVICE_TEAM): $APP"
     if [ -n "$DEV_ID" ]; then xcrun devicectl device install app --device "$DEV_ID" "$APP"
     else echo "set DEVICE_ID, then: xcrun devicectl device install app --device <id> '$APP'"; fi
@@ -70,3 +144,4 @@ case "${1:-help}" in
   help|*)
     echo "usage: $0 sim|device   — identical render config for both; only arch/signing/install differ" ;;
 esac
+
