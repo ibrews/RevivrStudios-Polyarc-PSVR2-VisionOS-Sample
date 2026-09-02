@@ -138,7 +138,13 @@ public:
 	// zero and run the v23 test rig (bMultiStrategyTest=true) to find the
 	// right correction for that rig.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Skeletal Driver|Tuning")
-	FRotator WristAdjustRotation = FRotator(0.0f, 0.0f, 90.0f);
+	// @AGILELENS 2026-09-02: was FRotator(0,0,90) -- a per-project 90-degree roll derived
+	// empirically for Pinchwork back when the wrist basis was uncorrected upstream.
+	// Engine commit 43fbde04b ("bake ARKit hand-joint basis correction into the engine")
+	// now applies that correction inside OXRVisionOS itself, so keeping this here
+	// DOUBLE-CORRECTS the wrist. Zeroed: raw is the correct rotation now.
+	// If hands look wrong again, this is the first value to try restoring to 90.
+	FRotator WristAdjustRotation = FRotator(0.0f, 0.0f, 0.0f);
 
 	// V26: stretch DISTAL bones only along their bone-along (Z) axis so the
 	// fingertip mesh reaches where the user's actual fingertip is. Earlier
