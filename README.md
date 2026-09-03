@@ -34,3 +34,7 @@ retired — see its `RETIRED-DO-NOT-BUILD.md`.
 ## Status
 
 Early. The AVP path is the furthest along; Android XR and Pico follow.
+
+---
+
+Made by [Agile Lens](https://agilelens.com).
