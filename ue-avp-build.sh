@@ -108,6 +108,12 @@ verify_log_or_fail() {
     echo "[ue-avp-build] BuildCookRun's own exit code said success, but ue-build-log-status.sh found an explicit FAIL marker in $LOGFILE -- treating this as a hard failure." >&2
     exit 1
   fi
+  # 2026-09-03: this function's own last statement used to be the `if` test above. When status_rc
+  # is anything but 1 (the overwhelmingly common case: a genuine PASS), that `[ ... -eq 1 ]` test
+  # itself evaluates false -- exit status 1 -- and since it's the function's LAST command, `set -e`
+  # read that as verify_log_or_fail (and therefore bcr, and therefore the whole script) FAILING,
+  # even though the build had just printed "OVERALL: PASS". Explicit `return 0` closes the gap.
+  return 0
 }
 
 bcr() {  # shared BuildCookRun — render config comes from the project's committed ini (the Mixed/Pinchwork config), UNTOUCHED
