@@ -10,6 +10,8 @@ public class My_ProjectTarget : TargetRules
 		Type = TargetType.Game;
 		DefaultBuildSettings = BuildSettingsVersion.V5;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_6;
+		// Required to build against an installed (Launcher) engine — the Editor target already sets it.
+		bOverrideBuildEnvironment = true;
 		AdditionalCompilerArguments = "-Wno-error=implicit-int-float-conversion -Wno-error=implicit-int-conversion -Wno-error=implicit-int-conversion-on-negation";
 
 		ExtraModuleNames.AddRange( new string[] { "My_Project" } );
