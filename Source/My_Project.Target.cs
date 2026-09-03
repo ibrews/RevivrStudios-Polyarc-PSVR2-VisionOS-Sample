@@ -12,7 +12,11 @@ public class My_ProjectTarget : TargetRules
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_6;
 		// Required to build against an installed (Launcher) engine — the Editor target already sets it.
 		bOverrideBuildEnvironment = true;
-		AdditionalCompilerArguments = "-Wno-error=implicit-int-float-conversion -Wno-error=implicit-int-conversion -Wno-error=implicit-int-conversion-on-negation";
+		// clang-only flags; MSVC (Win64 editor on a Launcher engine) rejects them as D8021.
+		if (Target.Platform != UnrealTargetPlatform.Win64)
+		{
+			AdditionalCompilerArguments = "-Wno-error=implicit-int-float-conversion -Wno-error=implicit-int-conversion -Wno-error=implicit-int-conversion-on-negation";
+		}
 
 		ExtraModuleNames.AddRange( new string[] { "My_Project" } );
 	}
