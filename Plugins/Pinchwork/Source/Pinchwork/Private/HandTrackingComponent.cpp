@@ -35,6 +35,9 @@
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "HandSkeletalDriverComponent.h"
+#if PLATFORM_ANDROID
+#include "OpenXRBlueprintFunctionLibrary.h" // UOpenXRBlueprintFunctionLibrary::SetEnvironmentBlendMode -- Android XR passthrough (see BeginPlay)
+#endif
 
 // --- Gun: middle-curl fire trigger + grip offset (tunable; dial on-device, then bake into the gun BP) ---
 static TAutoConsoleVariable<float> CVarGunTriggerCurl(
@@ -309,6 +312,21 @@ void UHandTrackingComponent::BeginPlay()
 	if (!bIsRight)
 	{
 		UE::SwiftMainBridgeNS::ConfigureImmersiveSpace(1 /*Mixed*/, GRealHandsVisible ? 1 : 0);
+	}
+#endif
+
+	// Android XR (Pico Swan, XREAL Aura): unlike visionOS, nothing project-level requests
+	// passthrough -- grepping the whole repo found no C++/ini call setting XR environment blend
+	// mode on Android at all, so the OpenXR runtime just negotiates whatever it defaults to
+	// (observed as opaque/VR, hands and environment both invisible). AlphaBlend (3) is the
+	// standard OpenXR passthrough blend mode; same fix + same value independently confirmed
+	// working for a different Android XR project's XRGameMode BeginPlay
+	// (see intelligence/techniques -- PROGRESS-2026-08-18-aura-overnight.md). Calling the plain
+	// engine UFUNCTION directly from C++ sidesteps that project's Blueprint-pin issue entirely.
+#if PLATFORM_ANDROID
+	if (!bIsRight)
+	{
+		UOpenXRBlueprintFunctionLibrary::SetEnvironmentBlendMode(3 /*AlphaBlend*/);
 	}
 #endif
 }

@@ -16,6 +16,9 @@ public class Pinchwork : ModuleRules
 		// XRBase: IHandTracker modular feature + HMD keypoint types.
 		// EnhancedInput: gesture -> input-action injection.
 		// HeadMountedDisplay: EHandKeypoint / HeadMountedDisplayTypes.
-		PrivateDependencyModuleNames.AddRange(new string[] { "XRBase", "EnhancedInput", "HeadMountedDisplay" });
+		// OpenXRHMD: UOpenXRBlueprintFunctionLibrary::SetEnvironmentBlendMode — Android XR has no
+		// project-level equivalent to visionOS's ConfigureImmersiveSpace, so BeginPlay calls this
+		// directly to request AlphaBlend (passthrough) instead of whatever the runtime defaults to.
+		PrivateDependencyModuleNames.AddRange(new string[] { "XRBase", "EnhancedInput", "HeadMountedDisplay", "OpenXRHMD" });
 	}
 }
