@@ -127,3 +127,72 @@ At handoff time, Fort had ONE stray process: `UnrealEditor-Cmd.exe` PID 75728, r
 ### Board / cleanup
 
 Session board entry `Alexs-MacBook-Pro-3-alex-mbp-lumenwork-avp-pico-aura` is checked in with `ue-build-engine,avp-device(M5)` — **release/update this claim on resume** so a fresh session doesn't think the singleton is still held by a live process (it isn't — this session is stopping).
+
+---
+
+## Pinch input: decision for Alex (D33 — prep only, no cook/build/device touched)
+
+The manager board's "6 pinch InputActions unresolved" entry frames this as an open force-cook-vs-migrate
+choice. **Direct repo audit shows that framing is stale: Option A (force-cook) is already implemented
+in `Config/DefaultGame.ini`, by this same "budget critical" session, earlier today.** Nothing referenced
+is actually *absent* from Lumenwork — every asset the board called missing already exists on disk.
+
+### 1. Reference audit — what's referenced, by what, and whether it's present
+
+| Asset | Referenced by | Present in Lumenwork Content? |
+|---|---|---|
+| `IA_IndexThumbPinch_Left/Right` | `HandTrackingComponent.cpp:269-270` (hardcoded `ConstructorHelpers::FObjectFinderOptional`, `/Game/VRTemplate/Input/Actions/Hands/...`) | Yes — `Content/VRTemplate/Input/Actions/Hands/` |
+| `IA_MiddleThumbPinch_Left/Right` | same, lines 271-272 | Yes — same dir |
+| `IA_PinkyThumbPinch_Left/Right` | same, lines 273-274 | Yes — same dir |
+| `IA_Shoot_Right` (7th string-loaded action, same pattern) | `HandTrackingComponent.cpp:900-901`, `/Game/VRTemplate/Input/Actions/IA_Shoot_Right` | Yes — `Content/VRTemplate/Input/Actions/` |
+| `BP_Picture` | `PassthroughTemplate.umap`, `L_XRTemplateMovableTest.umap`, `VRPawn_HandWorldControl` | Yes — `Content/AVPTemplate/WorldControl/Blueprints/BP_Picture.uasset` |
+| `PistolPinch` | same two maps | Yes — `Content/AVPTemplate/VRTemplate/Blueprints/PistolPinch.uasset` |
+
+All six pinch `InputAction`s are loaded via `ConstructorHelpers::FObjectFinderOptional` inside
+`HandTrackingComponent`'s constructor — a **string path load, invisible to the cooker's reference
+walker** (same mechanism as `StaticLoadObject`/`OpenLevel`-by-name elsewhere in this component, per the
+existing `Config/DefaultGame.ini` comments). That's *why* they need `+DirectoriesToAlwaysCook`, not
+because the assets are missing.
+
+### 2. Option A — force-cook (ALREADY DONE in config, verification pending)
+
+`Config/DefaultGame.ini` already carries, added earlier this session (comment dated 2026-09-03):
+```
++DirectoriesToAlwaysCook=(Path="/Game/VRTemplate/Input/Actions/Hands")
++DirectoriesToAlwaysCook=(Path="/Game/AVPTemplate/VRTemplate/Input")
++DirectoriesToAlwaysCook=(Path="/Game/AVPTemplate/WorldControl")
++DirectoriesToAlwaysCook=(Path="/Game/StarterContent/Audio")
++DirectoriesToAlwaysCook=(Path="/Game/StarterContent/Particles")
+```
+No content pull from Fort is needed — every referenced asset is already local. **Size added to the
+cook: 24 MB total** (`VRTemplate/Input/Actions/Hands` 56K + `AVPTemplate/VRTemplate/Input` 160K +
+`AVPTemplate/WorldControl` 3.8M, which includes `BP_Picture` 140K + `PistolPinch` 100K +
+`StarterContent/Audio` 19M + `StarterContent/Particles` 1.1M). Trivial next to the existing 805-package
+cook. **Remaining work is exactly the "Exact next command (resume here)" section above** — reconstruct
+the stale VisionOS `.target` receipt, re-run `BuildCookRun -skipbuild -cook -stage -pak -package`, grep
+the cook log for `BP_Picture`/`VRPawn_HandWorldControl`/the `Hands` actions, install, and confirm zero
+`LogUObjectGlobals: Error` for the 6 `IA_*ThumbPinch_*` actions at runtime. No further config or content
+decision is required for Option A — it's a build-and-verify task, already gated behind the
+receipt-fix/recook children per this session's rules (no cook/build/device touched here).
+
+### 3. Option B — migrate references (not recommended; more work, no benefit found)
+
+Would mean editing `Plugins/Pinchwork/Source/Pinchwork/Private/HandTrackingComponent.cpp` lines
+269-274 (+900-901 for `IA_Shoot_Right`) to point at `Content/XRFramework/Input/Actions/Hands/` instead
+of `VRTemplate/Input/Actions/Hands/` — the set BP_XRPawn (the XRFramework pawn) already uses.
+**Blocker: XRFramework's Hands set doesn't have pinch actions.** It has
+`IA_Hand_Grasp/IndexCurl/Point/ThumbUp_{Left,Right}` (32K) but no `IA_*ThumbPinch_*` — those would have
+to be newly authored or copied over and re-parented, since `VRPawn_HandWorldControl` (Alex's actual
+active pawn, not `BP_XRPawn`) is what carries `HandTrackingComponent` and drives `BP_Picture`/
+`PistolPinch`. Estimated size: same ~24 MB of content either copied or left in place, **plus** a
+C++ change requiring a full plugin recompile (not just a recook) on every target. **Risk:** behavior
+drift — `HandTrackingComponent` is shared plugin code touched last by the Pinchwork template author,
+not this project; a migrate here doesn't touch StarterContent/Audio or Particles at all (a separate,
+unrelated CDO-constructor path in the same file), so Option B alone would still need Option A's other
+three directives regardless. No functional upside over Option A was found.
+
+### Recommendation surfaced, not decided here
+
+Option A is coded, cheap (24 MB), touches no C++, and is already the resume point in this file's
+"Exact next command" section above. Option B duplicates that cost and adds a plugin recompile for no
+found benefit. This is Alex's call per standing process, not overridden here — surfaced as prep only.
