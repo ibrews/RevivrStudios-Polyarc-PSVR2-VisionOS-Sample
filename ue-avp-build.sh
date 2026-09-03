@@ -157,7 +157,28 @@ case "$MODE" in
     # Device = arm64 (no -clientarchitecture). Agile Lens signing. Immersive apps can't be remote-launched → tap.
     bcr "-ini:Engine:[/Script/MacTargetPlatform.XcodeProjectSettings]:CodeSigningTeam=$DEVICE_TEAM"
     APP="$(newest_app)"
-    DEV_ID="${DEVICE_ID:-$(xcrun devicectl list devices 2>/dev/null | grep -i "vision" | grep -i "physical" | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' | head -1)}"
+    # 2026-09-03: this auto-detect was doubly broken and FAILED SILENTLY (fixed upstream in
+    # Lumenwork's ue-avp-build.sh, commit 6077437 — ported here verbatim).
+    #  1. The old regex was a UUID pattern (8-4-4-4-12). Apple Vision Pro UDIDs are ECID format
+    #     (8-16, e.g. 00008142-000468E83409401C), so it matched NOTHING -> DEV_ID empty ->
+    #     the `if [ -n "$DEV_ID" ]` below skipped the install with no error. A build would
+    #     "succeed" having installed nothing.
+    #  2. Even with a correct regex, `head -1` takes devicectl's FIRST vision device, which can
+    #     be an `unavailable` older AVP -- not the connected one.
+    # Now: match the real UDID shape, and prefer connected > available, never unavailable.
+    if [ -z "${DEVICE_ID:-}" ]; then
+        _devs=$(xcrun devicectl list devices 2>/dev/null | grep -i "vision" | grep -i "physical")
+        DEV_ID=$(printf '%s\n' "$_devs" | grep -i "connected"          | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}' | head -1)
+        [ -z "$DEV_ID" ] && DEV_ID=$(printf '%s\n' "$_devs" | grep -i "available" | grep -vi "unavailable" | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}' | head -1)
+        if [ -z "$DEV_ID" ]; then
+            echo "[ue-avp-build] ERROR: no connected/available visionOS device found. Pass DEVICE_ID=<udid> explicitly." >&2
+            echo "[ue-avp-build] devices seen:" >&2; printf '%s\n' "$_devs" >&2
+        else
+            echo "[ue-avp-build] auto-detected device: $DEV_ID"
+        fi
+    else
+        DEV_ID="$DEVICE_ID"
+    fi
     echo "built (Agile Lens $DEVICE_TEAM): $APP"
     if [ -n "$DEV_ID" ]; then xcrun devicectl device install app --device "$DEV_ID" "$APP"
     else echo "set DEVICE_ID, then: xcrun devicectl device install app --device <id> '$APP'"; fi
