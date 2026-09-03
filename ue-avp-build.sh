@@ -41,6 +41,27 @@ export NuGetAudit=false   # clean-machine: Magick.NET 14.10.2 NU1902 is treated 
 STAGE_DIR="$(dirname "$PROJECT")/Saved/StagedBuilds/VisionOS"
 
 MODE="${1:-help}"
+
+# D21b (2026-09-03): refuse a RETIRED or HOLLOW engine tree before spending a compile on it.
+# On 2026-09-03 a lane built against the retired 5.6 trunk root instead of the worktree UE_ROOT
+# names, compiled all 670 modules from intact source, and died at ApplePostBuildSync on the
+# missing DotNet runtime -- 2h57m for nothing. This gate costs ~1 second.
+# Script: ~/knowledge/scripts/ue-build-preflight.sh · decision:
+# ~/knowledge/intelligence/decisions/2026-09-03-one-golden-trunk-avp-openxr.md
+# FAIL CLOSED. The first cut of this gate said `[ -x "$UE_PREFLIGHT" ]` and the KB copy was mode
+# 644, so the whole check was skipped in silence and a `sim` run against the retired root sailed
+# straight into RunUAT -- the exact fail-open shape that made worktree-scope-guard.sh a no-op on
+# four Windows machines for weeks (see that script's jq comment block). Invoke through `bash` so a
+# lost exec bit cannot disarm it, and abort if the script is missing rather than assuming OK.
+UE_PREFLIGHT="$HOME/knowledge/scripts/ue-build-preflight.sh"
+if [ "$MODE" != "help" ]; then
+  if [ ! -f "$UE_PREFLIGHT" ]; then
+    echo "[ue-avp-build] ABORT: engine preflight missing at $UE_PREFLIGHT -- run: cd ~/knowledge && git pull --rebase" >&2
+    exit 1
+  fi
+  UE_ROOT="$UE_ROOT" bash "$UE_PREFLIGHT" --tree "$UE_ROOT" \
+    || { echo "[ue-avp-build] preflight refused this engine tree -- aborting before the build. Set UE_ROOT to the golden trunk (see ue-avp-build.config) or repair the tree." >&2; exit 1; }
+fi
 SCRIPT_START="$(date +%s)"
 KB_SCRIPTS="$HOME/knowledge/scripts"
 STATUS_SCRIPT="$KB_SCRIPTS/ue-build-log-status.sh"
