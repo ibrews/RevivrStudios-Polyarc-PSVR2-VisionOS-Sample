@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Alex Coulombe. MIT License.
 
-#include "VisionProGPUDetection.h"
+#include "../VisionProGPUDetection.h"
 
 #if PLATFORM_MAC || PLATFORM_IOS || PLATFORM_VISIONOS
 #import <Metal/Metal.h>

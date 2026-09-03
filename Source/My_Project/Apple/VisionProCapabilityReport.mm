@@ -6,7 +6,7 @@
 // picks up every .cpp/.mm/.cc under Source/My_Project automatically), so no Build.cs change is
 // needed for the file itself -- see INTEGRATION.md for the one module dependency worth adding.
 
-#include "VisionProCapabilityReport.h"
+#include "../VisionProCapabilityReport.h"
 
 #include "CoreGlobals.h"
 #include "HAL/IConsoleManager.h"
