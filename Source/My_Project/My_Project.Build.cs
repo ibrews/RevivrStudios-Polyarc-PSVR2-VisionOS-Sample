@@ -48,6 +48,16 @@ public class My_Project : ModuleRules
 		// 	PrivateDependencyModuleNames.Add("SpatialAccessoryTracking");
 		// }
 
+		// Android XR starts every app at POWER_SAVING (CPU+GPU) and only raises it if the app
+		// asks via XR_EXT_performance_settings; UE's stock OpenXR plugin never asks, so the
+		// headset silently throttles for the whole session (14% GPU util, bad framerate) unless
+		// we request SustainedHigh through Google's AndroidXR plugin ourselves.
+		// See intelligence/techniques/ue-android-xr-runs-at-power-saving-unless-you-ask.md
+		if (Target.Platform == UnrealTargetPlatform.Android)
+		{
+			PrivateDependencyModuleNames.Add("AndroidXR");
+		}
+
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
 		

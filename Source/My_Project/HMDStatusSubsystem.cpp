@@ -8,11 +8,18 @@
 #include "Logging/LogMacros.h"
 #include "Misc/CoreDelegates.h"
 
+#if PLATFORM_ANDROID
+#include "IAndroidXRModule.h"
+#include "AndroidXRTypes.h"
+#endif
+
 DEFINE_LOG_CATEGORY_STATIC(LogMyProjectHMD, Log, All);
 
 void UHMDStatusSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+
+	RequestAndroidXRSustainedPerformance();
 
 	FCoreDelegates::VRHeadsetReconnected.AddUObject(this, &UHMDStatusSubsystem::HmdReconnected);
 
@@ -50,4 +57,24 @@ void UHMDStatusSubsystem::OnAppWillTerminate()
 {
 	UE_LOG(LogMyProjectHMD, Warning, TEXT("[Purgatory-Fix] OnAppWillTerminate — calling RequestExit(force=true)"));
 	FPlatformMisc::RequestExit(/*Force=*/true);
+}
+
+void UHMDStatusSubsystem::RequestAndroidXRSustainedPerformance()
+{
+#if PLATFORM_ANDROID
+	if (IAndroidXRModule::IsAvailable())
+	{
+		IAndroidXRModule& XR = IAndroidXRModule::Get();
+		const bool bCpu = XR.PerfSettingsSetPerformanceLevel(
+			EAndroidXRPerfSettingsDomain::CPU, EAndroidXRPerfSettingsLevel::SustainedHigh);
+		const bool bGpu = XR.PerfSettingsSetPerformanceLevel(
+			EAndroidXRPerfSettingsDomain::GPU, EAndroidXRPerfSettingsLevel::SustainedHigh);
+		UE_LOG(LogMyProjectHMD, Log, TEXT("[AndroidXR-Perf] SustainedHigh request cpu=%s gpu=%s"),
+			bCpu ? TEXT("ok") : TEXT("REFUSED"), bGpu ? TEXT("ok") : TEXT("REFUSED"));
+	}
+	else
+	{
+		UE_LOG(LogMyProjectHMD, Warning, TEXT("[AndroidXR-Perf] AndroidXR module not available — device will stay at POWER_SAVING"));
+	}
+#endif
 }

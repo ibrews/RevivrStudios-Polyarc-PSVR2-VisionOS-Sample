@@ -28,4 +28,9 @@ private:
 	void OnAppDeactivated();
 	void OnAppBackgrounded();
 	void OnAppWillTerminate();
+
+	// Android XR starts every app throttled at POWER_SAVING and never raises it unless asked;
+	// UE's OpenXR plugin has no XR_EXT_performance_settings support, so we ask directly through
+	// Google's AndroidXR plugin. No-op (guarded) on every non-Android platform.
+	void RequestAndroidXRSustainedPerformance();
 };
