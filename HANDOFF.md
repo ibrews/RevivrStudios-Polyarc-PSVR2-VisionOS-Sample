@@ -313,3 +313,81 @@ Alex taps the icon, wears it, reports blocky/not. Pull the log, grep `VOSDepthFi
 interpretation guide: `~/knowledge/intelligence/techniques/visionos-translucent-depth-fixup-forward-only-regressed-by-sm5-lumen.md`
 (2026-09-03 addendum, bottom of file). The visual verdict from Alex is still required regardless
 of what the log says.
+
+---
+
+## HANDOFF — 2026-09-03 (sunrise resume `lumenwork-visionos-receipt`) — 3/4 defects independently re-confirmed; M5 frame-verify still blocked on wear, one open thread on the -skipbuild log
+
+Re-verified each named defect against disk/git directly (not trusting the prior summary):
+
+1. **`.target` receipt (`Project` field kept)** — CONFIRMED. Read
+   `Binaries/VisionOS/My_Project.target` directly: `"Project": "../../My_Project.uproject"` present.
+   Matches the KB fix recipe in
+   `~/knowledge/intelligence/techniques/ue58-installed-engine-visionos-package-receipt-workaround.md`
+   (`TargetMetadata.json` → `.target` conversion table + the `ProjectFile`→`Project` gotcha).
+2. **Polyarc `ue-avp-build.sh` device-detect bug** — CONFIRMED via
+   `git show 1b856a9a -- ue-avp-build.sh` in `RevivrStudios-Polyarc-PSVR2-VisionOS-Sample`
+   (HEAD of `exp/device-shadows-58`): correctly ports Lumenwork's own `6077437` fix — ECID-format
+   regex (`[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}`, not UUID-shape) + connected>available preference.
+3. **`-skipbuild` repackage succeeds** — **PARTIALLY RE-VERIFIED, one gap.** `Saved/StagedBuilds/VisionOS/My_Project.app`
+   content (`cookeddata/.../my_project-visionos.pak`, 11.5 MB) is dated **15:31**, valid. BUT: the two
+   most recent `ue-avp-build.sh` device-mode logs I could find
+   (`Saved/BuildLogs/ue-avp-build-device-My_Project-{49504,60116}.log`, 15:25 and 15:27) are BOTH
+   **full `-build` invocations (not `-skipbuild`) and both FAILED rc=6** — "Failed to finalize the
+   .app with Xcode" — the known, unfixable-at-root UBT/Xcode-under-UBT finalize quirk documented in
+   the KB doc above (by-hand `xcodebuild` with the identical command always succeeds; root cause
+   unknown, only reproduces when spawned by UBT). This is expected/known, NOT a regression, and NOT
+   one of the 4 named defects — but it means the receipt (mtime ~15:25) and binary
+   (`Binaries/VisionOS/My_Project`, mtime 15:27:27) currently on disk were almost certainly produced
+   by the documented **manual workaround** (extract+convert `TargetMetadata.json` →
+   `scripts/ue-write-target-receipt.py`) after one of these failures, not by an automated success.
+   **I could not locate the actual `-skipbuild` invocation's log** (nothing under `Saved/BuildLogs`
+   is named/dated for a skipbuild run between 15:27 and 15:31, and `ue-avp-build.sh` doesn't special-case
+   the log filename for skip-build mode vs. build mode — same `ue-avp-build-device-*` pattern, so if one
+   ran it should be there but isn't, or it predates my search window). **Next step for whoever picks
+   this up:** grep `Saved/BuildLogs/*.log` for `-skipbuild` and confirm one exists with `rc=0` around
+   15:28-15:31; if genuinely absent, rerun
+   `RunUAT BuildCookRun -project=My_Project.uproject -target=My_Project -platform=VisionOS
+   -clientconfig=Development -skipbuild -cook -stage -pak -package -nop4 -unattended -nopause
+   -utf8output` once more and capture its own log to close this out cleanly. Low risk either way —
+   the staged `.app` on disk right now is contentwise valid (see #4) — but the *named* defect is
+   "the rerun succeeds," which wants its own clean rc=0 log, not an inference from file mtimes.
+4. **M5 install verifies frames > 0** — **substantively YES, with one freshness caveat; still
+   blocked on wear for a byte-exact re-check.** Device state changed mid-run: `xcrun devicectl list
+   devices` now shows the M5 (`00008142-000468E83409401C`) as **`connected`** (was `unavailable`
+   all prior session). Did a fresh `devicectl device install app` of the CURRENT staged `.app` —
+   succeeded, no DDI-lock error. Attempted `devicectl device process launch --terminate-existing` —
+   hung 90+s with **no PID, no error**, the exact documented Gotcha 16 signature for an unworn
+   headset (`connected` in the device list is NOT the same as worn — confirmed against
+   `ue-visionos-cook-build-gotchas.md` Gotcha 16, line ~655). Killed cleanly (`pkill`), app stays
+   installed. Diagnosed via the sandbox-file method instead of waiting out the hang: pulled the
+   existing `Documents/My_Project/Saved/Logs/My_Project.log` (63 MB) from the device — this is from
+   a short (~3 min) session that ended locally ~15:16, i.e. **before** the 15:27 binary rebuild, so
+   it is not a byte-exact receipt for the CURRENT install, but the content pipeline (source, assets)
+   is unchanged between the two — only the packaging/receipt path changed today. Ran
+   `~/knowledge/scripts/ue-checks/verify-device-build.py --log <pulled log> --expect-platform
+   METAL_SM5_IOS --min-frames 1`: **`OK: run looks healthy`** — frame counter reached 999+ (wrapped,
+   true total higher), scalability pass ran, `METAL_SM5_IOS` confirmed. `GameMode = 'BP_XRGameMode_C'`
+   confirmed via `LogLoad: Game class is 'BP_XRGameMode_C'`. Did **not** find an explicit
+   `VRPawn_HandWorldControl` possession line with the grep patterns tried — worth a broader search
+   (`grep -i "handworldcontrol"` case-insensitive, or search for the pawn's `BeginPlay` log if any) rather
+   than concluding it's absent. **ThumbPinch InputAction errors: 18 present, NOT zero** — all
+   `CDO Constructor (HandTrackingComponent): Failed to find .../IA_*ThumbPinch_*` — this is the
+   separately-tracked **D33 defect** (force-cook of `Content/VRTemplate/Input/Actions/Hands/` not
+   actually landing the 6 ThumbPinch assets in the pak), already diagnosed as unfixed in the prior
+   handoff entry above, NOT one of this run's 4 named defects — don't conflate the two when scoring
+   completion.
+   **Pulled log saved at `/tmp/lumenwork-verify/My_Project.log`** (63 MB, gitignored location) for
+   whoever picks this up next — no need to re-pull unless a fresher one is needed.
+   **Resume when M5 shows truly worn** (launch returns a PID promptly, not a hang): rerun the same
+   `devicectl device process launch`, then pull the fresh `My_Project.log`, rerun
+   `verify-device-build.py` against it, and specifically grep for `HandWorldControl` case-insensitive
+   to close the Pawn check.
+
+**Autorun state:** not calling `done` — defect #3's log gap and #4's byte-exact-freshness caveat are
+real, if low-risk, open threads, and the wear-blocker for a truly fresh #4 re-check persists. Heartbeat
+this via `autorun.sh progress lumenwork-visionos-receipt` and continue; do not park unless hitting the
+5h cap.
+
+Session handed off at ~132k context via `session-handoff-model.sh` rather than continuing to burn this
+window — successor should pick up at the "Next step" bullets in #3 and #4 above.
