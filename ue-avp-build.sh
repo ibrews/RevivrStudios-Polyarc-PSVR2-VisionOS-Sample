@@ -111,8 +111,19 @@ verify_log_or_fail() {
 }
 
 bcr() {  # shared BuildCookRun — render config comes from the project's committed ini (the Mixed/Pinchwork config), UNTOUCHED
-  "$UAT" BuildCookRun -project="$PROJECT" -target="$TARGET" -platform=VisionOS \
-    -clientconfig="$CLIENTCONFIG" -build -cook -stage -pak -package -nop4 -unattended -nopause -utf8output "$@"
+  # 2026-09-03: SKIP_BUILD=1 drops -build (which pairs with -package) and adds -skipbuild -unrealexe
+  # instead, so a fresh -cook -stage -pak can run against an already-finalized .app without re-hitting
+  # the Xcode ApplePostBuildSync finalize flake. Passing -skipbuild ALONGSIDE the hardcoded -build (the
+  # old way of calling this) does nothing -- -build still runs and still hits the flake first.
+  if [ "${SKIP_BUILD:-0}" = "1" ]; then
+    "$UAT" BuildCookRun -project="$PROJECT" -target="$TARGET" -platform=VisionOS \
+      -clientconfig="$CLIENTCONFIG" -cook -stage -pak -skipbuild \
+      -unrealexe="$UE_ROOT/Engine/Binaries/Mac/UnrealEditor-Cmd" \
+      -nocompileeditor -skipbuildeditor -nop4 -unattended -nopause -utf8output "$@"
+  else
+    "$UAT" BuildCookRun -project="$PROJECT" -target="$TARGET" -platform=VisionOS \
+      -clientconfig="$CLIENTCONFIG" -build -cook -stage -pak -package -nop4 -unattended -nopause -utf8output "$@"
+  fi
   verify_log_or_fail
 }
 newest_app() { ls -dt "$STAGE_DIR"/*.app 2>/dev/null | head -1; }
