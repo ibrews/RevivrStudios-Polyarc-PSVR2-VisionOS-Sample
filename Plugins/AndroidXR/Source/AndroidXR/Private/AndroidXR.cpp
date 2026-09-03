@@ -30,6 +30,23 @@ extern struct android_app* GNativeAndroidApp;
 
 DEFINE_LOG_CATEGORY(LogAndroidXR);
 
+// ---------------------------------------------------------------------------------------------
+// Preferred display refresh rate. Android XR / PICO / Quest all support XR_FB_display_refresh_rate,
+// but nothing in UE or this plugin ever REQUESTS a rate, so a headset stays on whatever its runtime
+// defaults to (Galaxy XR ships at 72 Hz while its panel also reports 90 -- see `adb shell
+// dumpsys display | grep supportedModes`). The engine has no cvar for this and the only public
+// route is a Blueprint call, which a BP-only project must wire by hand; this makes it settable
+// from config so it can be verified in the packaged build before a headset test.
+static TAutoConsoleVariable<float> CVarAndroidXRPreferredDisplayRefreshRate(
+    TEXT("xr.AndroidXR.PreferredDisplayRefreshRate"),
+    0.0f,
+    TEXT("Display refresh rate to request at session creation, in Hz. ")
+    TEXT("0 = leave the runtime default alone (default). ")
+    TEXT("Negative = request the HIGHEST rate the runtime reports as supported. ")
+    TEXT("Positive = request exactly this rate, if the runtime reports it as supported. ")
+    TEXT("Backed by XR_FB_display_refresh_rate."),
+    ECVF_Default);
+
 template<typename T> void SetConsoleVariable(const char* Name, T Value)
 {
     auto* ConsoleVariable =
@@ -88,6 +105,33 @@ bool FAndroidXR::GetCustomLoader(PFN_xrGetInstanceProcAddr* OutGetProcAddr)
     // The impl of this func, other than the loader name, is copied from
     // FOpenXRHMDModule::GetDefaultLoader() in
     // Engine/Plugins/Runtime/OpenXR/Source/OpenXRHMD/Private/OpenXRHMDModule.cpp.
+    // -----------------------------------------------------------------------------------
+    // DEVICE GATE. Without this, the gate is only #if PLATFORM_ANDROID, so the Android XR
+    // loader is claimed on EVERY Android device -- including Meta Quest and PICO, where the
+    // vendor's own libopenxr_loader.so is the one that works. That silently breaks a single
+    // multi-vendor APK: the app installs and launches but never enters immersive mode.
+    {
+        const FString DeviceMake = FPlatformMisc::GetDeviceMake().ToLower();
+        // DENY-LIST, not an allow-list. Android XR ships on hardware from multiple vendors, and
+        // their reported manufacturer strings differ (they are not all the same OEM name), so an
+        // allow-list keyed on one manufacturer wrongly declines the loader on every other
+        // Android XR device. Meta and PICO are the only platforms whose own loader must win;
+        // everything else gets the Android XR loader.
+        const bool bUseVendorLoader =
+            !DeviceMake.Contains(TEXT("oculus")) &&
+            !DeviceMake.Contains(TEXT("meta")) &&
+            !DeviceMake.Contains(TEXT("pico"));
+        if (!bUseVendorLoader)
+        {
+            UE_LOG(LogAndroidXR, Log,
+                TEXT("Meta/PICO device (manufacturer='%s'); declining the custom loader so the ")
+                TEXT("default OpenXR loader is used."), *DeviceMake);
+            return false;
+        }
+        UE_LOG(LogAndroidXR, Log, TEXT("Android XR device (manufacturer='%s'); using the Android XR loader."), *DeviceMake);
+    }
+    // -----------------------------------------------------------------------------------
+
     FString LoaderName = "libandroidxr_openxr_loader.so";
     LoaderHandle = FPlatformProcess::GetDllHandle(*LoaderName);
 
@@ -169,6 +213,77 @@ void FAndroidXR::PostCreateInstance(XrInstance InInstance)
 void FAndroidXR::PostCreateSession(XrSession InSession)
 {
     Session = InSession;
+
+    // Apply the preferred display refresh rate, if one was configured. Done here because the
+    // session must exist and the XR_FB_display_refresh_rate function pointers must already be
+    // resolved (both true by PostCreateSession).
+    const float Preferred = CVarAndroidXRPreferredDisplayRefreshRate.GetValueOnAnyThread();
+    if (Preferred != 0.0f)
+    {
+        TArray<float> SupportedRates;
+        if (!EnumerateDisplayRefreshRates(SupportedRates) || SupportedRates.Num() == 0)
+        {
+            UE_LOG(LogAndroidXR, Warning,
+                TEXT("PreferredDisplayRefreshRate: could not enumerate supported refresh rates; "
+                     "leaving the runtime default in place."));
+            return;
+        }
+
+        // Log what the runtime actually offers -- this is the ground truth per device.
+        FString RateList;
+        for (float Rate : SupportedRates)
+        {
+            RateList += FString::Printf(TEXT("%.2f "), Rate);
+        }
+        UE_LOG(LogAndroidXR, Log,
+            TEXT("PreferredDisplayRefreshRate: runtime supports [ %s]"), *RateList);
+
+        float Target = 0.0f;
+        if (Preferred < 0.0f)
+        {
+            for (float Rate : SupportedRates)
+            {
+                Target = FMath::Max(Target, Rate);
+            }
+        }
+        else
+        {
+            // Only request an exactly-supported rate; xrRequestDisplayRefreshRateFB rejects others.
+            for (float Rate : SupportedRates)
+            {
+                if (FMath::IsNearlyEqual(Rate, Preferred, 0.5f))
+                {
+                    Target = Rate;
+                    break;
+                }
+            }
+            if (Target == 0.0f)
+            {
+                UE_LOG(LogAndroidXR, Warning,
+                    TEXT("PreferredDisplayRefreshRate: %.2f Hz is NOT in the supported list; "
+                         "leaving the runtime default in place."), Preferred);
+                return;
+            }
+        }
+
+        float PreviousRate = 0.0f;
+        GetDisplayRefreshRate(PreviousRate);
+
+        if (RequestDisplayRefreshRate(Target))
+        {
+            float NewRate = 0.0f;
+            GetDisplayRefreshRate(NewRate);
+            UE_LOG(LogAndroidXR, Log,
+                TEXT("PreferredDisplayRefreshRate: requested %.2f Hz (was %.2f Hz, now reports %.2f Hz)"),
+                Target, PreviousRate, NewRate);
+        }
+        else
+        {
+            UE_LOG(LogAndroidXR, Warning,
+                TEXT("PreferredDisplayRefreshRate: request for %.2f Hz FAILED (still %.2f Hz)"),
+                Target, PreviousRate);
+        }
+    }
 }
 
 bool FAndroidXR::GetOptionalExtensions(TArray<const ANSICHAR*>& OutExtensions)

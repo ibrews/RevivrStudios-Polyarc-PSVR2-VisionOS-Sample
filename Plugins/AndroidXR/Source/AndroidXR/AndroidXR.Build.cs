@@ -98,6 +98,9 @@ namespace UnrealBuildTool.Rules
                 Content.AppendLine("</true></if>");
             }
             Content.AppendLine("</androidManifestUpdates></root>");
+            // As above, the dependent plugin's Intermediate directory may not
+            // exist yet on a fresh clone.
+            APLFile.Directory.Create();
             File.WriteAllText(APLFile.FullName, Content.ToString());
             Rules.AdditionalPropertiesForReceipt.Add("AndroidPlugin", APLFile.FullName);
         }
@@ -170,6 +173,10 @@ namespace UnrealBuildTool.Rules
                     SpatialVersion = System.Math.Max(SpatialSDKWritten, SpatialVersion);
                 }
             }
+            // The Intermediate directory does not exist on a fresh clone, and
+            // File.WriteAllText will not create it, so creating the plugin's
+            // Intermediate directory is required before the write below.
+            MaxSDKWrittenFile.Directory.Create();
             File.WriteAllText(MaxSDKWrittenFile.FullName, SpatialVersion.ToString());
             var Builder = new StringBuilder();
             Builder.AppendLine($"<addFeature android:name=\"{AndroidSpatialFeatureName}\" android:version=\"{SpatialVersion}\" android:required=\"{(IsSpatialFeatureRequired ? "true" : "false")}\"/>");
