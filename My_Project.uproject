@@ -40,7 +40,7 @@
 		},
 		{
 			"Name": "OpenXRVisionOS",
-			"Enabled": false,
+			"Enabled": true,
 			"SupportedTargetPlatforms": [
 				"VisionOS"
 			]
