@@ -288,3 +288,28 @@ Next step for whoever picks up D33: re-cook once with verbose LogCook and confir
 `/Game/VRTemplate/Input/Actions/Hands` actually gets added to `CookDirectories` and whether
 `FindFilesRecursive` finds the 6 `.uasset` files under it.
 
+
+---
+
+## HANDOFF — 2026-09-03 (headless `lumenwork-avp-depth-edge`) — depth-fixup diagnostic fixed, new build staged, BLOCKED on M5 wear
+
+Alex re-confirmed the blocky depth-edge artifact is still present despite this morning's build
+already carrying the SM5 deferred-path fix (`c8842998bf87`/`e7a85dc85662`). Pulled that run's
+device log: the fixup pass's own `[VOSDepthFix]` diagnostic never fired once in 793 frames, but
+the diagnostic couldn't say whether `IsEnabled()` was false or the `ArraySize<2` guard ate it.
+
+Fixed the diagnostic itself (engine commit `574f4a6fcfca`, log-only, pushed to
+`ibrewsfork/codex/m5-render-validation-582`), rebuilt Lumenwork against it
+(`Binaries/VisionOS/My_Project.app`, built 14:42 today, verified the new UTF-16LE log strings are
+actually linked in). **Install is blocked — M5 not currently worn/connected
+(`CoreDeviceError 4016`).**
+
+**Resume once the M5 is worn:**
+```bash
+xcrun devicectl device install app --device 00008142-000468E83409401C \
+  "/Users/Shared/GH/Lumenwork/Binaries/VisionOS/My_Project.app"
+```
+Alex taps the icon, wears it, reports blocky/not. Pull the log, grep `VOSDepthFix` — full
+interpretation guide: `~/knowledge/intelligence/techniques/visionos-translucent-depth-fixup-forward-only-regressed-by-sm5-lumen.md`
+(2026-09-03 addendum, bottom of file). The visual verdict from Alex is still required regardless
+of what the log says.
