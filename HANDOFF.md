@@ -130,6 +130,43 @@ Session board entry `Alexs-MacBook-Pro-3-alex-mbp-lumenwork-avp-pico-aura` is ch
 
 ---
 
+## HANDOFF — 2026-09-03 ~10:55 EDT — VisionOS receipt fix + repackage DONE, install DONE, on-device verify NEEDS ALEX
+
+Session `lumenwork-visionos-receipt` (manager stand-in). Ran the "Exact next command (resume here)"
+steps above end to end:
+
+1. **VisionOS `.target` receipt reconstructed** via `ue-write-target-receipt.py` — `Project` field
+   correctly kept as `../../My_Project.uproject`, mtime fresh. `Plugins/*/Binaries/VisionOS/*.modules`
+   confirmed **not applicable** (VisionOS packaged targets are monolithic — no per-plugin runtime
+   manifest, per `ue-visionos-cook-build-gotchas.md`); Mac Editor `.modules` manifests (needed for
+   modular loading) were already present and correct.
+2. **Preflight passed** on the golden worktree (`ue582-xr-main-m5`).
+3. **Repackage (`-skipbuild -cook -stage -pak -package`) → `BUILD SUCCEEDED`.** Full cook ran (892/943
+   packages, 51 skipped-by-platform, 0 incremental). Verified via `strings` on the packaged
+   `.utoc` (authoritative — log-line presence isn't, since LogCook doesn't print every short asset
+   name at Display verbosity): **`BP_Picture`, `SM_SportsCar`, `VRPawn_HandWorldControl` all
+   confirmed present** in the shipped pak.
+4. **Installed to the M5** (`00008142-000468E83409401C`, connected) via `devicectl device install app`
+   — succeeded, bundle `com.agilelens.lumenwork.MyProject`.
+5. **On-device verify NOT DONE** — immersive apps can't be remote-launched; needs Alex to wear the M5
+   and tap the app icon, then re-run `verify-device-build.py --expect-platform METAL_SM5_IOS` against
+   the fresh device log for frame count / Pawn / GameMode / InputAction-error checks.
+
+### New finding for D33 (pinch InputAction decision) — the Option A config fix did NOT take effect this cook
+
+D33's prep doc below states `Config/DefaultGame.ini`'s `+DirectoriesToAlwaysCook=(Path="/Game/VRTemplate/Input/Actions/Hands")`
+(line 28) already force-cooks the 6 `IA_*ThumbPinch_*` actions, "verification pending." **This
+session's actual repackage is that verification, and it shows the fix did NOT work**: none of the 6
+`IA_*ThumbPinch_*` assets appear anywhere in the cook log or the packaged `.utoc` (checked both by
+grep and `strings`), even though the two *other* `DirectoriesToAlwaysCook` entries added in the same
+edit (`AVPTemplate/VRTemplate/Input`, `AVPTemplate/WorldControl`) demonstrably worked — `IA_Hand_Grasp_Right`
+and `BP_Picture` from those directories are both in the pak. The config line for the Hands directory
+is present verbatim and path-correct (`Content/VRTemplate/Input/Actions/Hands/IA_*ThumbPinch_*.uasset`
+exist on disk, matching `/Game/VRTemplate/Input/Actions/Hands` exactly) — root cause not investigated
+further here (out of this session's scope/budget); flagging for whoever picks up D33's decision.
+
+---
+
 ## Pinch input: decision for Alex (D33 — prep only, no cook/build/device touched)
 
 The manager board's "6 pinch InputActions unresolved" entry frames this as an open force-cook-vs-migrate
