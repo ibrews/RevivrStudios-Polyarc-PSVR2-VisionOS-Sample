@@ -78,7 +78,13 @@ namespace UE::SwiftMainBridgeNS
 // UpperLimbVisibility values per VisionOSRuntimeSettings: 0 = Hidden, 1 = Visible, 2 = Automatic.
 // ImmersiveStyle is left at 1 (Mixed) to match Config/VisionOS/VisionOSEngine.ini's ImmersiveStyle=1
 // -- this call only ever changes the upper-limb-visibility argument, never the immersive style.
-static bool GRealHandsVisible = false; // current toggle state; starts Hidden to match intended default
+// @AGILELENS 2026-09-03 (defect: real hands invisible on AVP M5, Alex's report today): this was
+// hardcoded to false ("starts Hidden to match intended default") from a prior debug session, and
+// BeginPlay below force-pushes it every level load, which is exactly why the VisionOSEngine.ini
+// UpperLimbVisibility=1 fix (Config/VisionOS/VisionOSEngine.ini) alone did NOT restore hands --
+// this static wins over the ini unconditionally. Flipped to true to match the actual intended
+// default (real hands visible). Not yet device-confirmed.
+static bool GRealHandsVisible = true; // current toggle state; starts Visible to match intended default
 
 // Held-gun grip ORIENTATION as an index into the 24 axis-aligned orientations, instead of guessing
 // Euler angles for the mesh's unknown native axes. A ring-thumb pinch on the FREE hand steps it (the
