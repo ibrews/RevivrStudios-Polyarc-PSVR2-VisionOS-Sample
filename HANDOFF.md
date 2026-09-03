@@ -233,3 +233,58 @@ three directives regardless. No functional upside over Option A was found.
 Option A is coded, cheap (24 MB), touches no C++, and is already the resume point in this file's
 "Exact next command" section above. Option B duplicates that cost and adds a plugin recompile for no
 found benefit. This is Alex's call per standing process, not overridden here — surfaced as prep only.
+
+---
+
+## HANDOFF — 2026-09-03 (relaunch) — receipt/package/Polyarc-script defects verified done; new D33 lead
+
+Session `lumenwork-visionos-receipt` (watchdog relaunch, revived after 40m silence). Verified the
+4 named defects directly against disk/git state rather than trusting the prior session's summary:
+
+1. **VisionOS `.target` receipt** — `Binaries/VisionOS/My_Project.target` mtime 10:43, `"Project":
+   "../../My_Project.uproject"` present. Confirmed valid.
+2. **`-skipbuild` repackage** — already succeeded per prior handoff; staged `.app` present at
+   `Saved/StagedBuilds/VisionOS/My_Project.app`, pak confirmed non-stale (see below).
+3. **Polyarc `ue-avp-build.sh` device-detect bug** — already fixed and committed at
+   `RevivrStudios-Polyarc-PSVR2-VisionOS-Sample@1b856a9a` ("fix(build-script): AVP device
+   auto-detect matched nothing and silently skipped install"), on HEAD of `exp/device-shadows-58`.
+   Same ECID-regex + connected>available fix as Lumenwork's own `6077437`. Confirmed done.
+4. **M5 frame-count verify** — **BLOCKED, not skippable by design.** `xcrun devicectl list
+   devices` shows ALL AVP entries (including the M5, `00008142-000468E83409401C`) as
+   `unavailable` — nothing is worn/connected right now. Immersive apps cannot be remote-launched.
+   Logged via `autorun.sh block` (Alex texted). **Resume: once the M5 shows `connected` or
+   `available` in `xcrun devicectl list devices`, tap the app icon, wait a few seconds, then pull
+   the runtime log and run `verify-device-build.py --expect-platform METAL_SM5_IOS`** (frame
+   count > 0, Pawn = `VRPawn_HandWorldControl`, GameMode = `BP_XRGameMode_C`, zero
+   `LogUObjectGlobals: Error` for the 6 `IA_*ThumbPinch_*` actions).
+
+### New lead on D33 (why the ThumbPinch force-cook still doesn't work) — not fixed, just diagnosed
+
+The previous session's "verification" that the `AVPTemplate/VRTemplate/Input` /
+`AVPTemplate/WorldControl` `DirectoriesToAlwaysCook` entries worked (grep/strings hit for
+`IA_Hand_Grasp_Right` in the pak) is **not actually proof** — that filename exists in **three**
+separate content locations (`Content/VRTemplate/Input/Actions/Hands/`,
+`Content/AVPTemplate/VRTemplate/Input/Actions/Hands/`, `Content/XRFramework/Input/Actions/Hands/`),
+and `strings`/grep on the `.utoc` can't distinguish which copy actually got cooked. Likewise
+`IMC_Hands.uasset` exists in three places; the one in the pak is plausibly the `XRFramework` copy
+(referenced normally by the active pawn's input setup) or the `AVPTemplate` copy, not proof the
+top-level `/Game/VRTemplate/Input/Actions/Hands` directive fired.
+
+Checked `CookOnTheFlyServer.cpp`'s `DirectoriesToAlwaysCook` handling directly (engine source,
+`ue582-xr-main-m5` worktree, ~line 8690): `TryConvertGameRelativePackagePathToLocalPath` failure
+would log a `Warning`-level "invalid element" line — **absent** from this session's cook log, so
+the path *did* resolve and got added to `CookDirectories`. The actual per-directory "Loading
+directory to always cook" trace is `Verbose`-only, so its absence in a Display-verbosity log proves
+nothing either way. Bottom line: config looks syntactically correct and accepted, but
+`IA_*ThumbPinch_*` (which physically exist ONLY under `Content/VRTemplate/Input/Actions/Hands/`, not
+under the `AVPTemplate` copy) are still confirmed absent from the pak via direct `strings` search —
+zero hits for `thumbpinch` (case-insensitive) anywhere in `my_project-visionos.pak`/`.utoc`, vs.
+`Hand_Grasp` present.
+
+**Not investigated further this session** (would require a fresh, expensive full re-cook with
+`-LogCmds="LogCook Verbose"` to get the per-directory trace line — out of scope for this run's
+named defects, and not worth spending the shared build-engine singleton on a side investigation).
+Next step for whoever picks up D33: re-cook once with verbose LogCook and confirm whether
+`/Game/VRTemplate/Input/Actions/Hands` actually gets added to `CookDirectories` and whether
+`FindFilesRecursive` finds the 6 `.uasset` files under it.
+
