@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 Google LLC -->
+<!---->
+<!-- Licensed under the Apache License, Version 2.0 (the "License"); -->
+<!-- you may not use this file except in compliance with the License. -->
+<!-- You may obtain a copy of the License at -->
+<!-- -->
+<!--     https://www.apache.org/licenses/LICENSE-2.0 -->
+<!-- -->
+<!-- Unless required by applicable law or agreed to in writing, software -->
+<!-- distributed under the License is distributed on an "AS IS" BASIS, -->
+<!-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. -->
+<!-- See the License for the specific language governing permissions and -->
+<!-- limitations under the License. -->
+<!-- AndroidXR plugin additions-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- updates applied to AndroidManifest.xml -->
+    <androidManifestUpdates>
+        <!-- AndroidXR doesnt use a broker and so we can skip these permissions but no harm in adding them for future compat -->
+        <addPermission android:name="org.khronos.openxr.permission.OPENXR" />
+        <addPermission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+
+        <!-- Set PROPERTY_XR_ACTIVITY_START_MODE to XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED for GameActivity activity -->
+        <loopElements tag="activity">
+            <setStringFromAttribute result="activityName" tag="$" name="android:name"/>
+            <setBoolIsEqual result="bGameActivity" arg1="$S(activityName)" arg2="com.epicgames.unreal.GameActivity"/>
+            <if condition="bGameActivity">
+                <true>
+                    <setElement result="immersiveProp" value="property"/>
+                    <addAttribute tag="$immersiveProp" name="android:name" value="android.window.PROPERTY_XR_ACTIVITY_START_MODE"/>
+                    <addAttribute tag="$immersiveProp" name="android:value" value="XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED"/>
+
+                    <addElement tag="activity" name="immersiveProp"/>
+                </true>
+            </if>
+        </loopElements>
+
+        <setElement result="nativeLibrary" value="uses-native-library"/>
+        <addAttribute tag="$nativeLibrary" name="android:name" value="libopenxr.google.so"/>
+        <addAttribute tag="$nativeLibrary" name="android:required" value="false"/>
+        <addElement tag="application" name="nativeLibrary"/>
+
+    </androidManifestUpdates>
+
+    <!-- Copy openxr loader libs to Intermediate/Android/APK so they get packaged in the apk -->
+    <!-- Lib is named libandroidxr_openxr_loader.so because the OculusOpenXRLoader engine
+         plugin copies a libopenxr_loader.so into the apk which is Meta-specific and won't
+         work on other platforms. That lib would stomp over whatever we copy here, so name
+         ours differently.-->
+    <resourceCopies>
+        <log text="Copying libandroidxr_openxr_loader.so"/>
+        <copyFile src="$S(PluginDir)/Libs/Android/arm64-v8a/libandroidxr_openxr_loader.so"
+                  dst="$S(BuildDir)/libs/arm64-v8a/libandroidxr_openxr_loader.so" />
+        <!-- add x86_64 lib for emulator support -->
+        <copyFile src="$S(PluginDir)/Libs/Android/x86_64/libandroidxr_openxr_loader.so"
+                  dst="$S(BuildDir)/libs/x86_64/libandroidxr_openxr_loader.so" />
+    </resourceCopies>
+</root>

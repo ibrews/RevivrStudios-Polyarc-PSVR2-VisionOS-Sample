@@ -70,6 +70,13 @@
 		{
 			"Name": "Pinchwork",
 			"Enabled": true
+		},
+		{
+			"Name": "AndroidXR",
+			"Enabled": true,
+			"SupportedTargetPlatforms": [
+				"Android"
+			]
 		}
 	],
 	"TargetPlatforms": [
