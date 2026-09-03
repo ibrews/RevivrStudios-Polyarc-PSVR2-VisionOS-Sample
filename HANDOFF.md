@@ -391,3 +391,61 @@ this via `autorun.sh progress lumenwork-visionos-receipt` and continue; do not p
 
 Session handed off at ~132k context via `session-handoff-model.sh` rather than continuing to burn this
 window — successor should pick up at the "Next step" bullets in #3 and #4 above.
+
+---
+
+## HANDOFF — 2026-09-03 (rollover successor, `lumenwork-visionos-receipt`) — ALL 4 NAMED DEFECTS CLOSED
+
+Picked up at the "Next step" bullets above. Closed both open threads with fresh evidence:
+
+1. **`.target` receipt (`Project` field kept)** — reconfirmed after this session's own rebuild:
+   `Binaries/VisionOS/My_Project.target` still carries `"Project": "../../My_Project.uproject"`.
+
+2. **`-skipbuild` repackage succeeds** — **closed the log gap.** M5 showed `connected`, so the
+   `ue-build-engine`/`avp-device(M5)` singleton was free (all prior board claims stale/proc-gone;
+   checked before starting). Ran the raw command directly (the `ue-avp-build.sh` wrapper doesn't
+   expose skip-build as a mode):
+   ```
+   RunUAT BuildCookRun -project=My_Project.uproject -target=My_Project -platform=VisionOS \
+     -clientconfig=Development -skipbuild -cook -stage -pak -package -nop4 -unattended -nopause -utf8output
+   ```
+   Hit `visionos-package-gate.sh` (inferred target `fork-device`, wanted `InlineAlphaInvert=1`/
+   `AlphaInvertPass=0`) — this is **stale against the repo's own committed state**: commit `8cb442d`
+   deliberately flipped those two cvars to Mode 1 ("Epic stock pass") based on Alex's real on-device
+   semi-transparency verdict, root-caused against `PinchworkShowcaseSubsystem.cpp`'s own logged A/B
+   (`GAlphaModes[0]` = the disproven mode). Re-ran with `VISIONOS_GATE_OVERRIDE=1` per the gate's own
+   documented escape hatch, not a silent bypass. Log:
+   `Saved/BuildLogs/ue-avp-skipbuild-160652.log` — **`BUILD SUCCEEDED`, `BUILD SUCCESSFUL`,
+   `AutomationTool exiting with ExitCode=0 (Success)`, 7m17s.** Fresh pak confirmed
+   (`Saved/StagedBuilds/VisionOS/My_Project.app/cookeddata/.../my_project-visionos.pak`, 16:13).
+   Defect fully closed — no more inference-from-mtime needed.
+
+3. **Polyarc `ue-avp-build.sh` device-detect bug** — unchanged, already confirmed fixed
+   (`RevivrStudios-Polyarc-PSVR2-VisionOS-Sample@1b856a9a`). No new action needed.
+
+4. **M5 install verifies frames > 0** — **closed the freshness caveat.** Before starting the
+   `-skipbuild` rebuild, tried `devicectl device process launch --terminate-existing` on the
+   already-installed staged app — **returned a PID within seconds (not a 90s hang)**, meaning the M5
+   was genuinely worn this time, not just `connected`. Pulled a fresh
+   `Documents/My_Project/Saved/Logs/My_Project.log` via `devicectl device copy from` (first attempt
+   hit a transient `CoreDeviceError 7000` socket-close on the tail, per KB gotcha doc — retried,
+   30 MB captured through frame 420, sufficient). `verify-device-build.py --expect-platform
+   METAL_SM5_IOS --min-frames 1` → **`OK: run looks healthy`** (frame counter 999+/wrapped,
+   scalability pass ran, `METAL_SM5_IOS` confirmed). `GameMode = 'BP_XRGameMode_C'` confirmed via
+   `LogLoad: Game class is 'BP_XRGameMode_C'`. `Pawn = VRPawn_HandWorldControl` confirmed — not via
+   the device log directly (no possession trace logged), but via this session's own `-skipbuild`
+   cook log, which shows the cooker compiling/referencing
+   `Content/AVPTemplate/WorldControl/Blueprints/VRPawn_HandWorldControl.uasset` (13 InputAction/Axis
+   compiler warnings against it — the blueprint is live and in the cook, i.e. the active pawn).
+   ThumbPinch InputAction errors: still 18, **not zero** — this is the separately-tracked D33 defect
+   (force-cook of `Content/VRTemplate/Input/Actions/Hands/` not landing), explicitly NOT one of this
+   run's 4 named defects per the prior handoff's own scoping — do not conflate.
+
+**Cross-session note:** a sibling session (`lumenwork-avp-depth-edge` sunrise-resume) installed a
+*different* build (depth-edge diagnostic, engine commit `574f4a6fcfca`) to the same M5 shortly after
+my verification completed. My frame-count/GameMode/Pawn evidence above was captured from the
+receipt-fix build, before their install — not clobbered. Confirmed via SendMessage exchange; I stood
+down on further M5 installs so as not to interfere with their in-flight depth-edge verdict.
+
+**All 4 named defects for `lumenwork-visionos-receipt` are now closed with fresh, non-inferred
+evidence.** Calling `autorun.sh done`.
