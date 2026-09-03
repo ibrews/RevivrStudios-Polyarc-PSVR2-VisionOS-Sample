@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "HMDStatusSubsystem.generated.h"
 
@@ -33,4 +34,20 @@ private:
 	// UE's OpenXR plugin has no XR_EXT_performance_settings support, so we ask directly through
 	// Google's AndroidXR plugin. No-op (guarded) on every non-Android platform.
 	void RequestAndroidXRSustainedPerformance();
+
+	// BP_XRPawn's BeginPlay runs "Execute Console Command" with
+	// "xr.SecondaryScreenPercentage.HMDRenderTarget 120", which sets the cvar at
+	// ECVF_SetByConsole -- the HIGHEST cvar priority in the engine, above
+	// ECVF_SetByDeviceProfile. That silently stomps whatever
+	// Config/DefaultDeviceProfiles.ini set (VisionOS/VisionProM5/Android_Adreno_Vulkan_SM5 all
+	// set HMDRenderTarget=70) back to 120 on every level start, with no error or log line
+	// calling attention to it. Snapshot the device-profile value here (before any pawn has had
+	// a chance to run BeginPlay) and re-apply it once, right after UWorld::BeginPlay finishes
+	// dispatching every actor's BeginPlay (confirmed in engine source: GameMode->StartPlay()
+	// runs before OnWorldBeginPlay broadcasts), at the same ECVF_SetByConsole priority so
+	// last-write-wins in our favor.
+	void OnWorldPostInit(UWorld* World, const UWorld::InitializationValues IVS);
+	void ReapplyDeviceProfileHMDRenderTarget();
+
+	float DeviceProfileHMDRenderTarget = 0.f;
 };
