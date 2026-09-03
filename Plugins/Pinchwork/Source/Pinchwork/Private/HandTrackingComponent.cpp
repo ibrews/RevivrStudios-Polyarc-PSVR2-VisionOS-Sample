@@ -326,7 +326,7 @@ void UHandTrackingComponent::BeginPlay()
 #if PLATFORM_ANDROID
 	if (!bIsRight)
 	{
-		UOpenXRBlueprintFunctionLibrary::SetEnvironmentBlendMode(3 /*AlphaBlend*/);
+		UOpenXRBlueprintFunctionLibrary::SetEnvironmentBlendMode(EOpenXREnvironmentBlendMode::AlphaBlend);
 	}
 #endif
 }
