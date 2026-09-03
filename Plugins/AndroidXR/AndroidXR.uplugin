@@ -1,0 +1,64 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "1.0.0",
+    "IsExperimentalVersion": false,
+    "IsBetaVersion": false,
+    "FriendlyName": "AndroidXR",
+    "Description": "AndroidXR base plugin, handles initialization and defines Unreal AndroidXR types",
+    "Category": "Virtual Reality",
+    "CreatedBy": "Google, Inc.",
+    "DocsURL": "",
+    "MarketplaceURL": "",
+    "SupportURL": "",
+    "EnabledByDefault": false,
+    "CanContainContent": false,
+    "Installed": false,
+    "SupportedTargetPlatforms": [
+        "Android"
+    ],
+    "Modules": [
+        {
+            "Name": "AndroidXR",
+            "Type": "Runtime",
+            "LoadingPhase": "PostConfigInit",
+            "PlatformAllowList": [
+                "Win64",
+                "Mac",
+                "Linux",
+                "Android"
+            ]
+        },
+        {
+            "Name": "AndroidXRTrackingSubsystem",
+            "Type": "Runtime",
+            "LoadingPhase": "PostConfigInit",
+            "PlatformAllowList": [
+                "Win64",
+                "Mac",
+                "Linux",
+                "Android"
+            ]
+        },
+        {
+            "Name": "AndroidXREditor",
+            "Type": "Editor",
+            "LoadingPhase": "PostEngineInit",
+            "PlatformAllowList": [
+                "Win64",
+                "Mac"
+            ]
+        }
+
+    ],
+    "Plugins": [
+        {
+            "Name": "OpenXR",
+            "Enabled": true
+        },
+        {
+            "Name": "AndroidPermission",
+            "Enabled": true
+        }
+    ]
+}
