@@ -83,7 +83,11 @@ namespace
 		int32 PropagateAlpha; // r.Mobile.PropagateAlpha
 	};
 
-	// Mode 0 is the current shipping default, so the app starts in its normal state.
+	// On-device verification (M5/Lumen, 2026-09-02): modes 0, 2, and 4 all render everything
+	// semi-transparent -- wrong. Only modes 1 and 3 look correct. Mode 1 (Epic stock pass) is now
+	// the shipping default below, and the ring-thumb-pinch cycler alternates 1<->3 only -- it never
+	// lands on 0, 2, or 4. All 5 entries and their exact Name strings stay intact: other
+	// tooling/logs reference them by index and name -- this only changes which ones are reachable.
 	static const FAlphaMode GAlphaModes[] = {
 		{ TEXT("0 inline=ON  stock=off alpha=ON  (current default)"), 1, 0, 1 },
 		{ TEXT("1 inline=off stock=ON  alpha=ON  (Epic stock pass)"), 0, 1, 1 },
@@ -118,6 +122,7 @@ namespace
 		{ TEXT("3 shadow=5 nanite=off aa=FXAA (Nanite OFF)"),      5, 0, 1 },
 		{ TEXT("4 shadow=5 nanite=ON  aa=MSAA"),                   5, 1, 3 },
 		{ TEXT("5 shadow=5 nanite=ON  aa=TAA"),                    5, 1, 2 },
+		{ TEXT("6 shadow=3 nanite=ON  aa=FXAA (medium shadow)"),   3, 1, 1 },
 	};
 	static constexpr int32 GNumQualityModes = UE_ARRAY_COUNT(GQualityModes);
 }
@@ -143,7 +148,10 @@ void UPinchworkShowcaseSubsystem::UpdateAlphaModeCycler()
 	if (bRing && !bPrevRingPinch && (Now - LastAlphaModeChangeTime) > 0.5)
 	{
 		LastAlphaModeChangeTime = Now;
-		AlphaMode = (AlphaMode + 1) % GNumAlphaModes;
+		// On-device verification showed only modes 1 (Epic stock pass) and 3 (both -- double-invert)
+		// render correctly; 0, 2, and 4 all put everything in semitransparency. Toggle between just
+		// those two rather than stepping the full GNumAlphaModes range.
+		AlphaMode = (AlphaMode == 1) ? 3 : 1;
 		ApplyAlphaMode(AlphaMode);
 	}
 	bPrevRingPinch = bRing;

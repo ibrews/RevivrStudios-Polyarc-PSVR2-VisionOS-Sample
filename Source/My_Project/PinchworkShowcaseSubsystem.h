@@ -58,7 +58,7 @@ private:
 	void UpdateAlphaModeCycler();
 	void ApplyAlphaMode(int32 Mode);
 
-	int32 AlphaMode = 0;
+	int32 AlphaMode = 1;
 	bool bPrevRingPinch = false;
 	double LastAlphaModeChangeTime = -1000.0;
 
