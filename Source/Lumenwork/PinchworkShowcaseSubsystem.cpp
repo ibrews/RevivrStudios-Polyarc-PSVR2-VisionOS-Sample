@@ -23,6 +23,7 @@
 #include "DataDrivenShaderPlatformInfo.h"  // FDataDrivenShaderPlatformInfo::GetName
 #include "RenderUtils.h"           // IsForwardShadingEnabled
 #include "VisionProGPUDetection.h" // runtime M2-vs-M5 GPU tier (Apple8 vs Apple9+)
+#include "Engine/PostProcessVolume.h" // runtime Lumen on/off override -- content-level, not console-variable-gated
 
 DEFINE_LOG_CATEGORY_STATIC(LogPinchworkShowcase, Log, All);
 
@@ -49,6 +50,15 @@ void UPinchworkShowcaseSubsystem::Tick(float DeltaTime)
 	// wiring. D1 is about what the compositor receives, which has nothing to do with whether hand
 	// tracking resolved.
 	UpdateAlphaProbe(DeltaTime);
+	UpdateGPUTrace(DeltaTime);
+	UpdateLumenOverride();
+
+	// 2026-09-04 FIX: DrawHud() used to be called only past the hand-wiring gate below, so if the
+	// wearer's hands weren't in view (or TryWire() hadn't succeeded yet), NOTHING showed on screen
+	// -- including the QUALITY MODE line, which Alex needed to read during an auto-cycle run and
+	// couldn't. Split into an always-visible part (mode/cycler status -- none of it needs hand
+	// data) and the hand-dependent part below.
+	DrawStatusHud();
 
 	if (!bWired)
 	{
@@ -207,6 +217,103 @@ static TAutoConsoleVariable<int32> CVarAlphaProbeOnce(
 	0,
 	TEXT("Set to 1 to fire one [ALPHAPROBE] capture. Auto-clears back to 0."),
 	ECVF_Default);
+
+// One-shot GPU trace trigger. 2026-09-04: Alex wants a RANKED breakdown of per-pass GPU cost,
+// not more blind cvar A/B -- `DumpGPU` is UE's own built-in profiler for exactly that (every
+// pass/draw, ranked by ms, written to Saved/Profiling/GPU as a browsable report). Fires ONCE,
+// automatically, `r.VisionOS.GPUTrace.Delay` seconds after this subsystem starts ticking (0 =
+// disabled, the default) -- long enough for the scene to load and settle so the captured frame is
+// representative, not a loading-screen frame. Deliberately does NOT check r.VisionOS.AutoCycle:
+// if both are enabled the capture may land mid-mode-transition, which is a caller error, not
+// something to guess around here.
+static TAutoConsoleVariable<float> CVarGPUTraceDelay(
+	TEXT("r.VisionOS.GPUTrace.Delay"),
+	0.0f,
+	TEXT("Seconds after startup to fire ONE DumpGPU capture. 0 disables (default)."),
+	ECVF_Default);
+
+void UPinchworkShowcaseSubsystem::UpdateGPUTrace(float DeltaTime)
+{
+	if (bGPUTraceFired)
+	{
+		return;
+	}
+
+	const float Delay = CVarGPUTraceDelay.GetValueOnGameThread();
+	if (Delay <= 0.0f)
+	{
+		return;
+	}
+
+	GPUTraceElapsed += DeltaTime;
+	if (GPUTraceElapsed < Delay)
+	{
+		return;
+	}
+
+	bGPUTraceFired = true;
+	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[GPUTRACE] firing DumpGPU at elapsed=%.1fs"), GPUTraceElapsed);
+	if (GLog) { GLog->Flush(); }
+	GEngine->Exec(GetWorld(), TEXT("DumpGPU"));
+}
+
+static TAutoConsoleVariable<int32> CVarLumenOverride(
+	TEXT("r.VisionOS.LumenOverride"),
+	-1,
+	TEXT("Force Lumen GI+Reflections on/off at runtime via a spawned unbound post-process volume.\n")
+	TEXT("-1 = leave as shipped (default), 0 = force OFF, 1 = force ON."),
+	ECVF_Default);
+
+void UPinchworkShowcaseSubsystem::UpdateLumenOverride()
+{
+	const int32 Wanted = CVarLumenOverride.GetValueOnGameThread();
+	if (Wanted == LastAppliedLumenOverride)
+	{
+		return; // no change since last tick -- avoid respawning/rewriting every frame
+	}
+
+	UWorld* World = GetWorld();
+	if (!World) { return; }
+
+	if (Wanted == -1)
+	{
+		// Returning to "shipped default" means removing our override entirely, not setting it to
+		// Lumen explicitly -- the project's own DefaultEngine.ini value should win once we're not
+		// forcing anything.
+		if (APostProcessVolume* Vol = LumenOverrideVolume.Get())
+		{
+			Vol->Destroy();
+			LumenOverrideVolume = nullptr;
+		}
+		LastAppliedLumenOverride = -1;
+		UE_LOG(LogPinchworkShowcase, Warning, TEXT("[LUMENOVERRIDE] -> shipped default (override removed)"));
+		if (GLog) { GLog->Flush(); }
+		return;
+	}
+
+	APostProcessVolume* Vol = LumenOverrideVolume.Get();
+	if (!Vol)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		Vol = World->SpawnActor<APostProcessVolume>(Params);
+		if (!Vol) { return; }
+		Vol->bUnbound = true;   // applies globally, not just inside a bounded volume shape
+		Vol->BlendWeight = 1.0f;
+		Vol->Priority = 100.0f; // outrank any level-placed volume so this test is unambiguous
+		LumenOverrideVolume = Vol;
+	}
+
+	const bool bLumenOn = (Wanted == 1);
+	Vol->Settings.bOverride_DynamicGlobalIlluminationMethod = true;
+	Vol->Settings.DynamicGlobalIlluminationMethod = bLumenOn ? EDynamicGlobalIlluminationMethod::Lumen : EDynamicGlobalIlluminationMethod::None;
+	Vol->Settings.bOverride_ReflectionMethod = true;
+	Vol->Settings.ReflectionMethod = bLumenOn ? EReflectionMethod::Lumen : EReflectionMethod::None;
+
+	LastAppliedLumenOverride = Wanted;
+	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[LUMENOVERRIDE] -> FORCED %s (GI+Reflections)"), bLumenOn ? TEXT("ON") : TEXT("OFF"));
+	if (GLog) { GLog->Flush(); }
+}
 
 void UPinchworkShowcaseSubsystem::UpdateAlphaProbe(float DeltaTime)
 {
@@ -454,23 +561,9 @@ void UPinchworkShowcaseSubsystem::SpawnBurst(const FVector& Center)
 	}
 }
 
-void UPinchworkShowcaseSubsystem::DrawHud()
+void UPinchworkShowcaseSubsystem::DrawStatusHud()
 {
 	if (!GEngine) { return; }
-	// FString (owning) — NOT const TCHAR*: the UTF8_TO_TCHAR temporary would
-	// dangle past this statement otherwise.
-	const FString LName = UTF8_TO_TCHAR(Pinchwork::GestureName(static_cast<Pinchwork::EGesture>((uint8)LeftHand->ActiveGesture)));
-	const FString RName = UTF8_TO_TCHAR(Pinchwork::GestureName(static_cast<Pinchwork::EGesture>((uint8)RightHand->ActiveGesture)));
-	const FString Hud = FString::Printf(
-		TEXT("Pinchwork 2.0 showcase\n")
-		TEXT("L: %s    R: %s\n")
-		TEXT("two-hand: %s   scale x%.2f\n")
-		TEXT("macro Fist->Open->FingerGuns  (last: %s)"),
-		*LName, *RName,
-		bTwoHandActive ? TEXT("ON") : TEXT("off"), LastScale,
-		LastMacroFired.IsEmpty() ? TEXT("-") : *LastMacroFired);
-	// Key 9101, duration 0 -> refreshed every frame (persistent overlay).
-	GEngine->AddOnScreenDebugMessage(9101, 0.f, FColor::Cyan, Hud);
 
 	// Alpha-mode cycler readout, on its own key so it renders as a separate, brighter line.
 	// Yellow because it is debug state, not normal app state - it should look temporary.
@@ -495,4 +588,30 @@ void UPinchworkShowcaseSubsystem::DrawHud()
 				bSM6 ? TEXT("ON") : TEXT("off"),
 				*UVisionProGPUDetection::GetGPUTierDisplayString()));
 	}
+
+	// GPU trace / Lumen override readout -- both new 2026-09-04, neither needs hand data.
+	GEngine->AddOnScreenDebugMessage(9105, 0.f, FColor::Magenta,
+		FString::Printf(TEXT("GPU TRACE: %s   LUMEN OVERRIDE: %s"),
+			bGPUTraceFired ? TEXT("fired (see log/Saved/Profiling/GPU)") : TEXT("pending or disabled"),
+			LastAppliedLumenOverride == 1 ? TEXT("FORCED ON") :
+			LastAppliedLumenOverride == 0 ? TEXT("FORCED OFF") : TEXT("shipped default")));
+}
+
+void UPinchworkShowcaseSubsystem::DrawHud()
+{
+	if (!GEngine) { return; }
+	// FString (owning) — NOT const TCHAR*: the UTF8_TO_TCHAR temporary would
+	// dangle past this statement otherwise.
+	const FString LName = UTF8_TO_TCHAR(Pinchwork::GestureName(static_cast<Pinchwork::EGesture>((uint8)LeftHand->ActiveGesture)));
+	const FString RName = UTF8_TO_TCHAR(Pinchwork::GestureName(static_cast<Pinchwork::EGesture>((uint8)RightHand->ActiveGesture)));
+	const FString Hud = FString::Printf(
+		TEXT("Pinchwork 2.0 showcase\n")
+		TEXT("L: %s    R: %s\n")
+		TEXT("two-hand: %s   scale x%.2f\n")
+		TEXT("macro Fist->Open->FingerGuns  (last: %s)"),
+		*LName, *RName,
+		bTwoHandActive ? TEXT("ON") : TEXT("off"), LastScale,
+		LastMacroFired.IsEmpty() ? TEXT("-") : *LastMacroFired);
+	// Key 9101, duration 0 -> refreshed every frame (persistent overlay).
+	GEngine->AddOnScreenDebugMessage(9101, 0.f, FColor::Cyan, Hud);
 }

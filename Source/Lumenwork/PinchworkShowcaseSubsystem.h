@@ -47,6 +47,9 @@ private:
 	void UpdateTwoHand(float DeltaTime);
 	void UpdateMacro();
 	void DrawHud();
+	// Hand-independent HUD lines (mode/cycler status) -- split out 2026-09-04 so they're visible
+	// even when hand tracking hasn't wired yet (see the Tick() comment for why this mattered).
+	void DrawStatusHud();
 
 	// --- Alpha-mode cycler (mixed-immersion debugging) ---
 	// A ring-thumb pinch on either hand steps through the candidate alpha-inversion configurations
@@ -94,6 +97,26 @@ private:
 	int32 QualityMode = 0;
 	bool bPrevPinkyPinch = false;
 	double LastQualityModeChangeTime = -1000.0;
+
+	// --- One-shot GPU trace (DumpGPU) ---
+	// 2026-09-04: Alex wants a RANKED per-pass GPU cost breakdown instead of more blind cvar A/B.
+	// Fires ONE `DumpGPU` capture r.VisionOS.GPUTrace.Delay seconds after startup (0 = disabled).
+	void UpdateGPUTrace(float DeltaTime);
+	double GPUTraceElapsed = 0.0;
+	bool bGPUTraceFired = false;
+
+	// --- Runtime Lumen on/off override (r.VisionOS.LumenOverride: -1=leave as shipped [default],
+	// 0=force off, 1=force on) ---
+	// A post-process volume's GI/Reflection method override is a per-frame BLENDED CONTENT value
+	// (FPostProcessSettings::DynamicGlobalIlluminationMethod), read fresh every frame from
+	// View.FinalPostProcessSettings -- NOT gated by the r.DynamicGlobalIlluminationMethod console
+	// variable's ECVF_ReadOnly flag (verified against DeferredShadingRenderer.cpp/
+	// IndirectLightRendering.cpp before adding this). So unlike the console-variable path, this CAN
+	// toggle Lumen off at runtime in one binary -- spawns one unbound, high-priority
+	// APostProcessVolume on first use and flips its override each time the cvar changes.
+	void UpdateLumenOverride();
+	TWeakObjectPtr<class APostProcessVolume> LumenOverrideVolume;
+	int32 LastAppliedLumenOverride = -2; // sentinel distinct from the cvar's own -1/0/1 range
 
 	// Per-hand committed pinch point (thumb-index midpoint) in world space, and
 	// whether that hand is currently pinching. Returns false if untracked.
