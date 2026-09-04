@@ -23,7 +23,7 @@ enum class EVisionProGPUTier : uint8
 };
 
 UCLASS()
-class MY_PROJECT_API UVisionProGPUDetection : public UBlueprintFunctionLibrary
+class LUMENWORK_API UVisionProGPUDetection : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 

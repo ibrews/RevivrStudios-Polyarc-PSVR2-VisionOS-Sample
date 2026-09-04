@@ -32,7 +32,7 @@
 #include "VisionProCapabilityReport.generated.h"
 
 UCLASS()
-class MY_PROJECT_API UVisionProCapabilityReport : public UBlueprintFunctionLibrary
+class LUMENWORK_API UVisionProCapabilityReport : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 

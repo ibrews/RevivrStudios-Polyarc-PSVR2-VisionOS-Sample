@@ -29,7 +29,7 @@
 class UHandTrackingComponent;
 
 UCLASS()
-class MY_PROJECT_API UPinchworkShowcaseSubsystem : public UTickableWorldSubsystem
+class LUMENWORK_API UPinchworkShowcaseSubsystem : public UTickableWorldSubsystem
 {
 	GENERATED_BODY()
 

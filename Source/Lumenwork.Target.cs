@@ -3,9 +3,9 @@
 using UnrealBuildTool;
 using System.Collections.Generic;
 
-public class My_ProjectTarget : TargetRules
+public class LumenworkTarget : TargetRules
 {
-	public My_ProjectTarget(TargetInfo Target) : base(Target)
+	public LumenworkTarget(TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Game;
 		DefaultBuildSettings = BuildSettingsVersion.V5;
@@ -18,6 +18,6 @@ public class My_ProjectTarget : TargetRules
 			AdditionalCompilerArguments = "-Wno-error=implicit-int-float-conversion -Wno-error=implicit-int-conversion -Wno-error=implicit-int-conversion-on-negation";
 		}
 
-		ExtraModuleNames.AddRange( new string[] { "My_Project" } );
+		ExtraModuleNames.AddRange( new string[] { "Lumenwork" } );
 	}
 }

@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class My_Project : ModuleRules
+public class Lumenwork : ModuleRules
 {
-	public My_Project(ReadOnlyTargetRules Target) : base(Target)
+	public Lumenwork(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
@@ -40,7 +40,7 @@ public class My_Project : ModuleRules
 		// FXRMotionControllerData / IXRTrackingSystem::GetMotionControllerData /
 		// RebaseObjectOrientationAndPosition, all removed from IXRTrackingSystem.h in UE 5.8 -
 		// this dependency alone was enough to break every VisionOS build against 5.8 regardless
-		// of the plugin's own Enabled state in My_Project.uproject, since it's added here
+		// of the plugin's own Enabled state in Lumenwork.uproject, since it's added here
 		// unconditionally for the platform. Re-enable (and update SpatialXRTrackingWrapper.h for
 		// the new IXRTrackingSystem API) if PSVR2 Sense support is wanted again.
 		// if (Target.Platform == UnrealTargetPlatform.VisionOS)

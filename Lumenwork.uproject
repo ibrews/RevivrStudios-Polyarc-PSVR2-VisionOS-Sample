@@ -5,7 +5,7 @@
 	"Description": "",
 	"Modules": [
 		{
-			"Name": "My_Project",
+			"Name": "Lumenwork",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}

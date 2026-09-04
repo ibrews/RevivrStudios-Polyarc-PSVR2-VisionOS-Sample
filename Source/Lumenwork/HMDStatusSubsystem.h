@@ -11,7 +11,7 @@
  * 
  */
 UCLASS()
-class MY_PROJECT_API UHMDStatusSubsystem : public UGameInstanceSubsystem
+class LUMENWORK_API UHMDStatusSubsystem : public UGameInstanceSubsystem
 {
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 

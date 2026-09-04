@@ -30,7 +30,7 @@
 // them directly via our Swift bridge and use the values for movement.
 //
 // Disabled 2026-08-14 (Alex: "we're not using it at all", same as the SpatialAccessoryTracking
-// plugin dependency in My_Project.Build.cs). These externs were satisfied by that plugin's Swift
+// plugin dependency in Lumenwork.Build.cs). These externs were satisfied by that plugin's Swift
 // bridge; with the plugin disabled the symbols no longer exist, which is an undefined-symbol LINK
 // error, not a compile error - it only surfaces at the final link step. The call sites below
 // already fall back cleanly to native UE gamepad input when no PSVR2 controller is detected

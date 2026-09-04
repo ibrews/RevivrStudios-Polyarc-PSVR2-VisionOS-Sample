@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Alex Coulombe. MIT License.
 //
 // Obj-C++ so it can talk to MTLDevice directly rather than through UE's MTL:: C++ wrapper --
-// that wrapper lives in MetalRHI/Private and is not reachable from a game module. My_Project's
+// that wrapper lives in MetalRHI/Private and is not reachable from a game module. Lumenwork's
 // Build.cs already compiles .mm (GamepadInputSetup / VisionProGPUDetection are both .mm and UBT
-// picks up every .cpp/.mm/.cc under Source/My_Project automatically), so no Build.cs change is
+// picks up every .cpp/.mm/.cc under Source/Lumenwork automatically), so no Build.cs change is
 // needed for the file itself -- see INTEGRATION.md for the one module dependency worth adding.
 
 #include "../VisionProCapabilityReport.h"
@@ -597,7 +597,7 @@ static FAutoConsoleCommand GVisionProCapabilityReportCmd(
 // profile values rather than the raw .ini ones.
 //
 // FDelayedAutoRegisterHelper is used rather than FCoreDelegates::GetOnPostEngineInit() only
-// because it needs no edit to My_Project.cpp -- both fire at an equivalent point. (Note if you
+// because it needs no edit to Lumenwork.cpp -- both fire at an equivalent point. (Note if you
 // switch: plain FCoreDelegates::OnPostEngineInit is UE_DEPRECATED in 5.8,
 // CoreDelegates.h:240-241; the accessor GetOnPostEngineInit() is the supported spelling.)
 static FDelayedAutoRegisterHelper GVisionProCapabilityReportAutoRun(

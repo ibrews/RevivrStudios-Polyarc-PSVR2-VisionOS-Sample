@@ -10,7 +10,7 @@ class UInputMappingContext;
 class APawn;
 
 UCLASS()
-class MY_PROJECT_API UGamepadInputSetup : public UGameInstanceSubsystem {
+class LUMENWORK_API UGamepadInputSetup : public UGameInstanceSubsystem {
   GENERATED_BODY()
 
 public:

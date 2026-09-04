@@ -7,7 +7,7 @@
 /**
  * 
  */
-class MY_PROJECT_API DummyClass
+class LUMENWORK_API DummyClass
 {
 public:
 	DummyClass();

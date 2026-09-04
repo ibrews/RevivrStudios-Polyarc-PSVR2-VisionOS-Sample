@@ -3,9 +3,9 @@
 using UnrealBuildTool;
 using System.Collections.Generic;
 
-public class My_ProjectEditorTarget : TargetRules
+public class LumenworkEditorTarget : TargetRules
 {
-	public My_ProjectEditorTarget(TargetInfo Target) : base(Target)
+	public LumenworkEditorTarget(TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V5;
@@ -17,6 +17,6 @@ public class My_ProjectEditorTarget : TargetRules
 			AdditionalCompilerArguments = "-Wno-error=implicit-int-float-conversion -Wno-error=implicit-int-conversion -Wno-error=implicit-int-conversion-on-negation";
 		}
 
-		ExtraModuleNames.AddRange( new string[] { "My_Project" } );
+		ExtraModuleNames.AddRange( new string[] { "Lumenwork" } );
 	}
 }
