@@ -90,6 +90,40 @@ alert_on_exit() {
   if [ -f "$FLEET_BUS" ]; then
     python3 "$FLEET_BUS" send --to human --body "ue-avp-build.sh $MODE ($TARGET on $(hostname -s)): $verdict in ${elapsed}s. Log: $LOGFILE" >/dev/null 2>&1 || true
   fi
+  log_build_timing "$rc" "$elapsed"
+}
+
+# 2026-09-04 (Alex): auto-track every invocation's timing so future sessions can give accurate
+# ETAs instead of guessing -- this used to only happen if a session remembered to hand-write a
+# task-timing-log.jsonl line at the END of a whole work session, which lost the cook-only vs
+# full-build distinction that actually matters for an estimate (a SKIP_BUILD cook-only pass and a
+# full -build -cook -stage -pak -package run differ by minutes, not seconds). One JSONL line per
+# invocation, keyed by that distinction via the `phase` field so they can be filtered separately.
+log_build_timing() {
+  local rc="$1" elapsed_s="$2"
+  local timing_log="$HOME/knowledge/departments/engineering/task-timing-log.jsonl"
+  [ -d "$(dirname "$timing_log")" ] || return 0
+  local machine="${FLEET_MACHINE:-$(hostname -s 2>/dev/null || echo unknown)}"
+  local phase="full-build"
+  [ "${SKIP_BUILD:-0}" = "1" ] && phase="cook-only(SKIP_BUILD)"
+  local outcome="success"
+  [ "$rc" -ne 0 ] && outcome="failed"
+  # UAT's own self-reported "BuildCookRun time: N.NNs" line is a tighter measure of the actual
+  # engine work than $elapsed_s (which also includes device install/auto-detect for `device` mode)
+  # -- prefer it when parseable, fall back to overall elapsed otherwise.
+  local ucr_s=""
+  [ -n "$LOGFILE" ] && [ -f "$LOGFILE" ] && \
+    ucr_s="$(grep -o 'BuildCookRun time: [0-9.]*' "$LOGFILE" 2>/dev/null | tail -1 | grep -o '[0-9.]*$')"
+  local duration_min
+  duration_min="$(awk -v s="$elapsed_s" 'BEGIN { printf "%.1f", s/60 }')"
+  local task="ue-avp-build.sh $MODE ($TARGET, $phase)"
+  local date_str="$(date +%Y-%m-%d)"
+  {
+    printf '{"task":"%s","type":"build_ue5","machine":"%s","duration_min":%s,"outcome":"%s","date":"%s"' \
+      "$task" "$machine" "$duration_min" "$outcome" "$date_str"
+    [ -n "$ucr_s" ] && printf ',"build_cook_run_s":%s' "$ucr_s"
+    printf ',"phase":"%s","elapsed_s":%s}\n' "$phase" "$elapsed_s"
+  } >> "$timing_log" 2>/dev/null || true
 }
 
 # Cross-check BuildCookRun's own exit code against the log itself. `set -e` already aborts this
