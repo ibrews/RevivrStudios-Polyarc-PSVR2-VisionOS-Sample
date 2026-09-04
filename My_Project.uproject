@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.8",
+	"EngineAssociation": "E5E4DB1D-2EEF-42C9-9F31-082BA5EE86A8",
 	"Category": "",
 	"Description": "",
 	"Modules": [
@@ -22,7 +22,14 @@
 		},
 		{
 			"Name": "OpenXR",
-			"Enabled": true
+			"Enabled": true,
+			"SupportedTargetPlatforms": [
+				"Win64",
+				"Linux",
+				"LinuxArm64",
+				"Android",
+				"VisionOS"
+			]
 		},
 		{
 			"Name": "OpenXREyeTracker",
@@ -36,7 +43,14 @@
 		},
 		{
 			"Name": "OpenXRHandTracking",
-			"Enabled": true
+			"Enabled": true,
+			"SupportedTargetPlatforms": [
+				"Win64",
+				"Linux",
+				"LinuxArm64",
+				"Android",
+				"VisionOS"
+			]
 		},
 		{
 			"Name": "OpenXRVisionOS",
@@ -63,10 +77,6 @@
 			"SupportedTargetPlatforms": [
 				"Android"
 			]
-		},
-		{
-			"Name": "LiveLinkHub",
-			"Enabled": true
 		}
 	],
 	"TargetPlatforms": [
