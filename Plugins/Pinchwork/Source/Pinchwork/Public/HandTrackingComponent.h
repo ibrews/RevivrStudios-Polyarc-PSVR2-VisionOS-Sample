@@ -387,9 +387,11 @@ public:
 	// --- Gesture → Enhanced Input ---
 
 	// Inject recognized gestures as Enhanced Input actions each frame they're
-	// active, so the VRPawn grab (and any other binding) can consume e.g.
-	// IA_IndexThumbPinch alongside the grip inputs. The per-hand action assets
-	// live at /Game/VRTemplate/Input/Actions/Hands/IA_<Gesture>_<Side>.
+	// active, so any binding can consume e.g. IA_IndexThumbPinch alongside the
+	// grip inputs. No default action assets ship with the plugin — a host
+	// project must assign its own to the (currently private) *PinchAction*
+	// fields in the .cpp. Grab itself does not depend on this: TryPinchGrab /
+	// NotifyPinchGrab drive it natively, independent of Enhanced Input.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Input")
 	bool bInjectGestureInputActions = true;
 

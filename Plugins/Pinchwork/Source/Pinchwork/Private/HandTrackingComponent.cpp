@@ -272,21 +272,16 @@ UHandTrackingComponent::UHandTrackingComponent()
 	static ConstructorHelpers::FObjectFinderOptional<UStaticMesh> EngineSphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	DefaultJointMesh = EngineSphereFinder.Get();
 
-	// Hard-reference the per-hand gesture Input Actions from the CDO so they are
-	// always cooked — StaticLoadObject / string paths are NOT cook references, so
-	// without this the assets wouldn't be packaged and the injection would no-op.
-	static ConstructorHelpers::FObjectFinderOptional<UInputAction> IdxL(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_IndexThumbPinch_Left.IA_IndexThumbPinch_Left"));
-	static ConstructorHelpers::FObjectFinderOptional<UInputAction> IdxR(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_IndexThumbPinch_Right.IA_IndexThumbPinch_Right"));
-	static ConstructorHelpers::FObjectFinderOptional<UInputAction> MidL(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_MiddleThumbPinch_Left.IA_MiddleThumbPinch_Left"));
-	static ConstructorHelpers::FObjectFinderOptional<UInputAction> MidR(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_MiddleThumbPinch_Right.IA_MiddleThumbPinch_Right"));
-	static ConstructorHelpers::FObjectFinderOptional<UInputAction> PnkL(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_PinkyThumbPinch_Left.IA_PinkyThumbPinch_Left"));
-	static ConstructorHelpers::FObjectFinderOptional<UInputAction> PnkR(TEXT("/Game/VRTemplate/Input/Actions/Hands/IA_PinkyThumbPinch_Right.IA_PinkyThumbPinch_Right"));
-	IndexThumbPinchActionLeft  = IdxL.Get();
-	IndexThumbPinchActionRight = IdxR.Get();
-	MiddlePinchActionLeft      = MidL.Get();
-	MiddlePinchActionRight     = MidR.Get();
-	PinkyPinchActionLeft       = PnkL.Get();
-	PinkyPinchActionRight      = PnkR.Get();
+	// The per-hand gesture Input Actions used to be hard-referenced here from
+	// Epic's VR Template path (/Game/VRTemplate/Input/Actions/Hands/IA_*Pinch_*)
+	// so they'd always be cooked. Those six .uasset files were deleted from the
+	// project (Lumenwork 6263750, 2026-09-03) — grab is now handled natively by
+	// TryPinchGrab/NotifyPinchGrab below, not via Enhanced Input injection, and
+	// nothing in the project binds these actions anymore. Left null: the
+	// IndexThumbPinchAction*/MiddlePinchAction*/PinkyPinchAction* fields stay
+	// nullptr, InjectGestureActions() already skips a null action, so
+	// bInjectGestureInputActions is a safe no-op until a host project assigns
+	// its own replacement actions to those fields.
 }
 
 void UHandTrackingComponent::BeginPlay()
