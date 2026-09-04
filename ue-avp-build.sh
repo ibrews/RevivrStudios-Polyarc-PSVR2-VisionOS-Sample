@@ -183,9 +183,15 @@ case "$MODE" in
     #     this Mac is an `unavailable` older AVP -- not the connected one.
     # Now: match the real UDID shape, and prefer connected > available, never unavailable.
     if [ -z "${DEVICE_ID:-}" ]; then
-        _devs=$(xcrun devicectl list devices 2>/dev/null | grep -i "vision" | grep -i "physical")
-        DEV_ID=$(printf '%s\n' "$_devs" | grep -i "connected"          | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}' | head -1)
-        [ -z "$DEV_ID" ] && DEV_ID=$(printf '%s\n' "$_devs" | grep -i "available" | grep -vi "unavailable" | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}' | head -1)
+        # 2026-09-03: each of these pipelines legitimately finds ZERO matches when no device is
+        # awake/connected -- that's the expected "not found yet" case the code below handles. But
+        # under `set -e -o pipefail`, a no-match grep's nonzero exit propagates through the pipe and
+        # aborts the WHOLE SCRIPT right here (silently, skipping the "available" fallback AND the
+        # explicit error message meant to handle exactly this) instead of falling through to them.
+        # `|| true` on each assignment keeps the intended fallback logic reachable.
+        _devs=$(xcrun devicectl list devices 2>/dev/null | grep -i "vision" | grep -i "physical") || true
+        DEV_ID=$(printf '%s\n' "$_devs" | grep -i "connected"          | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}' | head -1) || true
+        [ -z "$DEV_ID" ] && { DEV_ID=$(printf '%s\n' "$_devs" | grep -i "available" | grep -vi "unavailable" | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}' | head -1) || true; }
         if [ -z "$DEV_ID" ]; then
             echo "[ue-avp-build] ERROR: no connected/available visionOS device found. Pass DEVICE_ID=<udid> explicitly." >&2
             echo "[ue-avp-build] devices seen:" >&2; printf '%s\n' "$_devs" >&2
