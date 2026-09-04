@@ -322,6 +322,12 @@ void UHandTrackingComponent::BeginPlay()
 	if (!bIsRight)
 	{
 		UOpenXRBlueprintFunctionLibrary::SetEnvironmentBlendMode(EOpenXREnvironmentBlendMode::AlphaBlend);
+		// SetEnvironmentBlendMode returns void -- read the mode back so a device log grep
+		// (`[AndroidXR-Passthrough]`) proves the runtime actually honored AlphaBlend instead of
+		// requiring an on-headset eyeball check.
+		const EOpenXREnvironmentBlendMode ActualMode = UOpenXRBlueprintFunctionLibrary::GetEnvironmentBlendMode();
+		UE_LOG(LogTemp, Warning, TEXT("[AndroidXR-Passthrough] requested=AlphaBlend actual=%s"),
+			*UEnum::GetValueAsString(ActualMode));
 	}
 #endif
 }
