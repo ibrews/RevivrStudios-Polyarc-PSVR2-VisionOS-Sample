@@ -11,6 +11,13 @@
 #   ./ue-avp-build.sh device    # build+cook+package for a real AVP (Agile Lens signed), install (then TAP to launch)
 #   ./ue-avp-build.sh help
 #
+# ⚠️ CLAUDE CODE CALLERS: `sim`/`device` MUST be invoked with `dangerouslyDisableSandbox: true` on the
+# Bash tool call. Without it, modern-Xcode (bUseModernXcode=True) builds -- Mac Editor AND VisionOS/iOS
+# package targets both -- fail 100% of the time at the final Xcode finalize step ("Run custom shell
+# script 'Touch UBT generated tiles'" / "Bad file descriptor"), AFTER hundreds of compile/link actions
+# already succeeded. This is a real, deterministic Claude Code Bash-sandbox bug, not a UE/project issue.
+# Root cause + fix: ~/knowledge/intelligence/techniques/headless-xcodebuild-scheme-preaction-bad-file-descriptor.md
+#
 # Drop into a UE visionOS project root; edit CONFIG (or a sibling ue-avp-build.config). Canonical copy lives in the
 # KB (intelligence/techniques/scripts/). Design + rationale: intelligence/techniques/ue-visionos-sim-device-build-flow.md
 #
