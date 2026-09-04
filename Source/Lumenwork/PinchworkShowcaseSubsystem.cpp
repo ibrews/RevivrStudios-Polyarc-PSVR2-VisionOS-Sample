@@ -111,18 +111,39 @@ namespace
 		const TCHAR* Name;
 		int32 ShadowQuality;  // r.ShadowQuality (0=off .. 5=max)
 		int32 Nanite;         // r.Nanite (0/1)
-		int32 AntiAliasing;   // r.Mobile.AntiAliasing (0=off,1=FXAA,2=TAA,3=MSAA,4=TSR,5=SMAA)
+		int32 AntiAliasing;   // r.Mobile.AntiAliasing (0=off,1=FXAA,2=TAA,3=MSAA,4=TSR,5=SMAA) -- inert on M5 SM5, kept only for the M2/ES3_1 path
+		int32 ScreenProbeDownsample; // r.Lumen.ScreenProbeGather.DownsampleFactor (default 16; higher = fewer/coarser probes = cheaper)
+		int32 ScreenTraces;          // r.Lumen.ScreenProbeGather.ScreenTraces (default 1; 0 skips the screen-space trace pass)
+		int32 RadianceCache;         // r.Lumen.ScreenProbeGather.RadianceCache (default 1; persistent world-space cache)
+		int32 TraceMeshSDFs;         // r.Lumen.TraceMeshSDFs (default 0 on this project already)
 	};
 
 	// Mode 0 matches the shipping default so the app starts in its normal state.
+	//
+	// 2026-09-04: added 5 Lumen GPU-cost modes (7-11). The CSV profiler showed this build is
+	// GPU-bound at ~49ms/frame (~20fps) with GameThreadTime only 3.7ms -- almost certainly Lumen GI
+	// cost, not AA method. All four new-field cvars verified ECVF_Scalability|ECVF_RenderThreadSafe
+	// (genuinely runtime-safe, no shader permutation dependency) directly against ue582-xr-main-m5
+	// source before adding here -- see LumenScreenProbeGather.cpp / LumenScreenProbeTracing.cpp /
+	// LumenDiffuseIndirect.cpp. Each Lumen mode changes EXACTLY ONE field vs mode 7 (the Lumen
+	// baseline, itself identical to mode 0's shadow/nanite/aa) -- keeping every other knob fixed so
+	// a measured/visual difference has one unambiguous cause, not several confounded together.
+	// Mode 9 deliberately makes probes FINER (more expensive) as a sanity check on the measurement
+	// itself -- if mode 9 doesn't come back slower than mode 7, trust the methodology less, not
+	// just the knob.
 	static const FQualityMode GQualityModes[] = {
-		{ TEXT("0 shadow=5 nanite=ON  aa=FXAA (current default)"), 5, 1, 1 },
-		{ TEXT("1 shadow=1 nanite=ON  aa=FXAA (low shadow)"),      1, 1, 1 },
-		{ TEXT("2 shadow=0 nanite=ON  aa=FXAA (shadows OFF)"),     0, 1, 1 },
-		{ TEXT("3 shadow=5 nanite=off aa=FXAA (Nanite OFF)"),      5, 0, 1 },
-		{ TEXT("4 shadow=5 nanite=ON  aa=MSAA"),                   5, 1, 3 },
-		{ TEXT("5 shadow=5 nanite=ON  aa=TAA"),                    5, 1, 2 },
-		{ TEXT("6 shadow=3 nanite=ON  aa=FXAA (medium shadow)"),   3, 1, 1 },
+		{ TEXT("0 shadow=5 nanite=ON  aa=FXAA (current default)"), 5, 1, 1, 16, 1, 1, 0 },
+		{ TEXT("1 shadow=1 nanite=ON  aa=FXAA (low shadow)"),      1, 1, 1, 16, 1, 1, 0 },
+		{ TEXT("2 shadow=0 nanite=ON  aa=FXAA (shadows OFF)"),     0, 1, 1, 16, 1, 1, 0 },
+		{ TEXT("3 shadow=5 nanite=off aa=FXAA (Nanite OFF)"),      5, 0, 1, 16, 1, 1, 0 },
+		{ TEXT("4 shadow=5 nanite=ON  aa=MSAA"),                   5, 1, 3, 16, 1, 1, 0 },
+		{ TEXT("5 shadow=5 nanite=ON  aa=TAA"),                    5, 1, 2, 16, 1, 1, 0 },
+		{ TEXT("6 shadow=3 nanite=ON  aa=FXAA (medium shadow)"),   3, 1, 1, 16, 1, 1, 0 },
+		{ TEXT("7 LUMEN BASELINE (everything else = mode 0's values, untouched Lumen defaults)"), 5, 1, 1, 16, 1, 1, 0 },
+		{ TEXT("8 LUMEN probes 2x coarser (DownsampleFactor 32)"), 5, 1, 1, 32, 1, 1, 0 },
+		{ TEXT("9 LUMEN probes 2x FINER -- control, should be WORSE not better"), 5, 1, 1, 8, 1, 1, 0 },
+		{ TEXT("10 LUMEN screen traces OFF"),                      5, 1, 1, 16, 0, 1, 0 },
+		{ TEXT("11 LUMEN radiance cache OFF"),                     5, 1, 1, 16, 1, 0, 0 },
 	};
 	static constexpr int32 GNumQualityModes = UE_ARRAY_COUNT(GQualityModes);
 }
@@ -163,6 +184,10 @@ void UPinchworkShowcaseSubsystem::ApplyQualityMode(int32 Mode)
 	SetCVarInt(TEXT("r.ShadowQuality"), M.ShadowQuality);
 	SetCVarInt(TEXT("r.Nanite"), M.Nanite);
 	SetCVarInt(TEXT("r.Mobile.AntiAliasing"), M.AntiAliasing);
+	SetCVarInt(TEXT("r.Lumen.ScreenProbeGather.DownsampleFactor"), M.ScreenProbeDownsample);
+	SetCVarInt(TEXT("r.Lumen.ScreenProbeGather.ScreenTraces"), M.ScreenTraces);
+	SetCVarInt(TEXT("r.Lumen.ScreenProbeGather.RadianceCache"), M.RadianceCache);
+	SetCVarInt(TEXT("r.Lumen.TraceMeshSDFs"), M.TraceMeshSDFs);
 	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] -> %s"), M.Name);
 	if (GLog) { GLog->Flush(); }   // forced flush: this log is the record of what was on screen
 }
