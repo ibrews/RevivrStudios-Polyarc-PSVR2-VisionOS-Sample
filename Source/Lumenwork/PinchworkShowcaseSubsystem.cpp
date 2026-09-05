@@ -397,15 +397,20 @@ void UPinchworkShowcaseSubsystem::PlayModeChangeSound()
 			ActiveModeChangeSound = AC;
 			if (AC)
 			{
+				// 0.15s + 0.05s fade = 0.20s total, well under the 0.5s pinch-debounce cadence
+				// (LastQualityModeChangeTime / LastAlphaModeChangeTime). The prior 0.25s+0.08s=0.33s
+				// cap was too close to that 0.5s window -- on-device evidence from tonight's scripted
+				// demo shows successive mode changes landing 0.47-0.50s apart, leaving only ~170ms of
+				// margin, audible as a blend under any timer jitter.
 				TWeakObjectPtr<UAudioComponent> WeakAC = AC;
 				FTimerHandle StopTimer;
 				World->GetTimerManager().SetTimer(StopTimer, FTimerDelegate::CreateLambda([WeakAC]()
 				{
 					if (UAudioComponent* Comp = WeakAC.Get())
 					{
-						Comp->FadeOut(0.08f, 0.0f);
+						Comp->FadeOut(0.05f, 0.0f);
 					}
-				}), 0.25f, false);
+				}), 0.15f, false);
 			}
 		}
 	}
