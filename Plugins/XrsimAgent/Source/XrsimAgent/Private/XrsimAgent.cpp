@@ -35,7 +35,7 @@
 
 namespace
 {
-const TCHAR *Protocol = TEXT("xrsim.hand.v1");
+const TCHAR *ProtocolTag = TEXT("xrsim.hand.v1");
 using Json = TSharedPtr<FJsonObject>;
 Json Obj()
 {
@@ -149,7 +149,7 @@ class FXrsimAgent : public IModuleInterface, public IHandTracker, public FXRMoti
     void Reply(const FString &Id, Json Data)
     {
         Data->SetStringField(TEXT("id"), Id);
-        Data->SetStringField(TEXT("protocol"), Protocol);
+        Data->SetStringField(TEXT("protocol"), ProtocolTag);
         Write(TEXT("response-") + Id + TEXT(".json"), Data);
     }
     void Error(const FString &Id, const FString &Message)
@@ -162,7 +162,7 @@ class FXrsimAgent : public IModuleInterface, public IHandTracker, public FXRMoti
     Json Scene()
     {
         Json J = Obj();
-        J->SetStringField(TEXT("protocol"), Protocol);
+        J->SetStringField(TEXT("protocol"), ProtocolTag);
         J->SetStringField(TEXT("instance"), Instance);
         J->SetStringField(TEXT("input_source"), TEXT("unreal_ihandtracker_injection"));
         TArray<TSharedPtr<FJsonValue>> Trackers;
@@ -335,7 +335,7 @@ class FXrsimAgent : public IModuleInterface, public IHandTracker, public FXRMoti
         FGuid Guid;
         if (!FGuid::Parse(Id, Guid))
             return; // response filenames must never be supplied paths
-        if (P != Protocol)
+        if (P != ProtocolTag)
         {
             Error(Id, TEXT("unsupported protocol"));
             return;
