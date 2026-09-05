@@ -24,8 +24,9 @@
 #include "RenderUtils.h"           // IsForwardShadingEnabled
 #include "VisionProGPUDetection.h" // runtime M2-vs-M5 GPU tier (Apple8 vs Apple9+)
 #include "Engine/PostProcessVolume.h" // runtime Lumen on/off override -- content-level, not console-variable-gated
-#include "Kismet/GameplayStatics.h" // PlaySound2D for the mode-change cue
+#include "Kismet/GameplayStatics.h" // SpawnSound2D for the mode-change cue
 #include "Sound/SoundBase.h"
+#include "Components/AudioComponent.h" // handle to force-stop/cap the mode-change cue's length
 
 DEFINE_LOG_CATEGORY_STATIC(LogPinchworkShowcase, Log, All);
 
@@ -161,13 +162,13 @@ namespace
 	// AntiAliasingMethod(real r.AntiAliasingMethod, -1=leave as shipped), ScreenProbeDownsample,
 	// ScreenTraces, RadianceCache, TraceMeshSDFs, LumenState.
 	static const FQualityMode GQualityModes[] = {
-		{ TEXT("0 shadow=5 nanite=ON (inert on M5) aa=FXAA (current default)"), 5, 1, 1, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("1 shadow=1 nanite=ON (inert on M5) aa=FXAA (low shadow)"),      1, 1, 1, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("2 shadow=0 nanite=ON (inert on M5) aa=FXAA (shadows OFF)"),     0, 1, 1, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("3 shadow=5 nanite=off (inert on M5, unsupported on METAL_SM5_IOS) aa=FXAA"),      5, 0, 1, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("4 shadow=5 nanite=ON (inert on M5) aa=MSAA"),                   5, 1, 3, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("5 shadow=5 nanite=ON (inert on M5) aa=TAA (r.Mobile only, also inert on M5)"), 5, 1, 2, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("6 shadow=3 nanite=ON (inert on M5) aa=FXAA (medium shadow)"),   3, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("0 shadow=5 aa=FXAA (current default)"), 5, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("1 shadow=1 aa=FXAA (low shadow)"),      1, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("2 shadow=0 aa=FXAA (shadows OFF)"),     0, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("3 shadow=5 aa=FXAA (Nanite toggle removed from label -- confirmed inert/unsupported on METAL_SM5_IOS)"),      5, 0, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("4 shadow=5 aa=MSAA"),                   5, 1, 3, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("5 shadow=5 aa=TAA (r.Mobile only, inert on M5)"), 5, 1, 2, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("6 shadow=3 aa=FXAA (medium shadow)"),   3, 1, 1, -1, 16, 1, 1, 0, -1 },
 		{ TEXT("7 LUMEN BASELINE (everything else = mode 0's values, untouched Lumen defaults)"), 5, 1, 1, -1, 16, 1, 1, 0, -1 },
 		{ TEXT("8 LUMEN probes 2x coarser (DownsampleFactor 32)"), 5, 1, 1, -1, 32, 1, 1, 0, -1 },
 		{ TEXT("9 LUMEN probes 2x FINER -- control, should be WORSE not better"), 5, 1, 1, -1, 8, 1, 1, 0, -1 },
@@ -326,8 +327,32 @@ void UPinchworkShowcaseSubsystem::PlayModeChangeSound()
 	{
 		if (UWorld* World = GetWorld())
 		{
-			UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] PlaySound2D called"));
-			UGameplayStatics::PlaySound2D(World, Sound);
+			// 2026-09-05 fix: Alex correctly diagnosed this as "long or looping, so there's no
+			// noticeable change" -- StarterContent/Audio's ambient cues (Light/Fire/Steam/etc.) run
+			// several seconds each, per their file sizes (~300KB+ raw wave, not a short click). Fire-
+			// and-forget PlaySound2D on every mode change stacks overlapping multi-second instances
+			// into one continuous wash instead of a discrete per-change blip. Fix: stop any prior
+			// instance first, then force-cap this one to a short blip via a timer, regardless of the
+			// asset's real length -- makes ANY StarterContent cue work as a UI cue, not just a
+			// coincidentally-short one.
+			if (UAudioComponent* Prev = ActiveModeChangeSound.Get())
+			{
+				Prev->Stop();
+			}
+			UAudioComponent* AC = UGameplayStatics::SpawnSound2D(World, Sound);
+			ActiveModeChangeSound = AC;
+			if (AC)
+			{
+				TWeakObjectPtr<UAudioComponent> WeakAC = AC;
+				FTimerHandle StopTimer;
+				World->GetTimerManager().SetTimer(StopTimer, FTimerDelegate::CreateLambda([WeakAC]()
+				{
+					if (UAudioComponent* Comp = WeakAC.Get())
+					{
+						Comp->FadeOut(0.08f, 0.0f);
+					}
+				}), 0.25f, false);
+			}
 		}
 	}
 }
@@ -668,18 +693,18 @@ void UPinchworkShowcaseSubsystem::DrawStatusHud()
 	GEngine->AddOnScreenDebugMessage(9103, 0.f, FColor::Green,
 		FString::Printf(TEXT("QUALITY MODE (pinky-pinch to cycle): %s"), GQualityModes[QualityMode].Name));
 
-	// Render-config diagnostic: what's actually running, without a log pull. Alex asked on-device
-	// "are we still in deferred rendering, is SM6 on" -- this answers that live.
+	// Render-config diagnostic: what's actually running, without a log pull. Dropped the SM6=on/off
+	// readout (2026-09-05, Alex's request) -- this project never runs SM6, so showing it at all
+	// invited people to wonder when it would turn on. Platform/shading-path/GPU tier are still
+	// useful and are never "off" in a way that implies a missing feature.
 	{
 		const FStaticShaderPlatform Platform = GMaxRHIShaderPlatform;
 		const FString PlatformName = FDataDrivenShaderPlatformInfo::GetName(Platform).ToString();
 		const bool bForward = IsForwardShadingEnabled(Platform);
-		const bool bSM6 = PlatformName.Contains(TEXT("SM6"));
 		GEngine->AddOnScreenDebugMessage(9104, 0.f, FColor::Orange,
-			FString::Printf(TEXT("RENDER: platform=%s  %s  SM6=%s  GPU=%s"),
+			FString::Printf(TEXT("RENDER: platform=%s  %s  GPU=%s"),
 				*PlatformName,
 				bForward ? TEXT("FORWARD") : TEXT("DEFERRED"),
-				bSM6 ? TEXT("ON") : TEXT("off"),
 				*UVisionProGPUDetection::GetGPUTierDisplayString()));
 	}
 

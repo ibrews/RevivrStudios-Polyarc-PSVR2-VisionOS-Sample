@@ -124,6 +124,7 @@ private:
 	// TestFlight showcase build -- "so people know to look for a change."
 	void PlayModeChangeSound();
 	TWeakObjectPtr<class USoundBase> ModeChangeSound;
+	TWeakObjectPtr<class UAudioComponent> ActiveModeChangeSound; // so a new mode change can stop the previous cue before it naturally ends
 	bool bModeChangeSoundLoadAttempted = false;
 
 	// Per-hand committed pinch point (thumb-index midpoint) in world space, and
