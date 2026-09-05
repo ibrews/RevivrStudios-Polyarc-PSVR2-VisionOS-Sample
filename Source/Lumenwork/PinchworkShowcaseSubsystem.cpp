@@ -30,6 +30,21 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogPinchworkShowcase, Log, All);
 
+// 2026-09-05: VRPawn_HandWorldControl's scripted hand demo (5c3716b) calls Showcase_OnPinkyPinch
+// every tick its own touch-check reports true, relying on the 0.5s debounce below to turn that
+// into one mode step per 0.5s -- great for an unattended showcase, but it means a build launched
+// with -csvGpuStats captures the GPU cost of continuously cycling render modes, not a stable
+// config. Off by default (0 = unchanged behavior); set to 1 on the command line
+// (-ExecCmds="r.VisionOS.Showcase.DisableScriptedInput 1") for a profiling capture that needs a
+// fixed mode for the whole run.
+static TAutoConsoleVariable<int32> CVarShowcaseDisableScriptedInput(
+	TEXT("r.VisionOS.Showcase.DisableScriptedInput"),
+	0,
+	TEXT("1 disables Showcase_OnPinkyPinch/OnRingPinch mode-stepping (quality + alpha cyclers).\n")
+	TEXT("Use during automated GPU profiling captures so a scripted hand demo's pinch doesn't\n")
+	TEXT("confound the measurement with continuous mode cycling. 0 = normal showcase behavior."),
+	ECVF_Default);
+
 TStatId UPinchworkShowcaseSubsystem::GetStatId() const
 {
 	RETURN_QUICK_DECLARE_CYCLE_STAT(UPinchworkShowcaseSubsystem, STATGROUP_Tickables);
@@ -520,6 +535,8 @@ void UPinchworkShowcaseSubsystem::UpdateQualityModeCycler()
 
 void UPinchworkShowcaseSubsystem::Showcase_OnPinkyPinch()
 {
+	if (CVarShowcaseDisableScriptedInput.GetValueOnGameThread() != 0) { return; }
+
 	// Same debounce window as UpdateQualityModeCycler() above -- callers are expected to invoke this
 	// on every tick a Blueprint's own touch-check reports true, not just on the rising edge, so the
 	// debounce here is what turns a held pinch into exactly one mode step.
@@ -532,6 +549,8 @@ void UPinchworkShowcaseSubsystem::Showcase_OnPinkyPinch()
 
 void UPinchworkShowcaseSubsystem::Showcase_OnRingPinch()
 {
+	if (CVarShowcaseDisableScriptedInput.GetValueOnGameThread() != 0) { return; }
+
 	// Same debounce window and mode cycling as UpdateAlphaModeCycler() above.
 	const double Now = FPlatformTime::Seconds();
 	if ((Now - LastAlphaModeChangeTime) <= 0.5) { return; }
