@@ -124,6 +124,14 @@ namespace
 		int32 ShadowQuality;  // r.ShadowQuality (0=off .. 5=max)
 		int32 Nanite;         // r.Nanite (0/1)
 		int32 AntiAliasing;   // r.Mobile.AntiAliasing (0=off,1=FXAA,2=TAA,3=MSAA,4=TSR,5=SMAA) -- inert on M5 SM5, kept only for the M2/ES3_1 path
+		int32 AntiAliasingMethod; // r.AntiAliasingMethod, -1=leave as shipped (default). THIS is the cvar that
+		                          // actually matters on M5 SM5 (0=None,1=FXAA,2=TAA,3=MSAA,4=TSR,5=SMAA per
+		                          // SceneUtils.h). Confirmed ECVF_RenderThreadSafe (SceneView.cpp) -- genuinely
+		                          // runtime-cyclable like the others, NOT cook-time-gated as earlier tonight's
+		                          // notes assumed. TAA (2) deliberately NOT offered here: confirmed broken on
+		                          // this fork tonight (blank right eye, reproduced on-device, reverted) --
+		                          // that's a rendering-logic bug independent of how the cvar gets set, so a
+		                          // live toggle would hit the same bug, not avoid it.
 		int32 ScreenProbeDownsample; // r.Lumen.ScreenProbeGather.DownsampleFactor (default 16; higher = fewer/coarser probes = cheaper)
 		int32 ScreenTraces;          // r.Lumen.ScreenProbeGather.ScreenTraces (default 1; 0 skips the screen-space trace pass)
 		int32 RadianceCache;         // r.Lumen.ScreenProbeGather.RadianceCache (default 1; persistent world-space cache)
@@ -149,20 +157,25 @@ namespace
 	// project exists. LumenState=-1 on every other mode leaves Lumen exactly as shipped (no
 	// override applied at all -- see ApplyLumenState's -1 branch), so none of the diagnostic modes
 	// above accidentally touch it.
+	// Field order: Name, ShadowQuality, Nanite, AntiAliasing(inert r.Mobile.AntiAliasing),
+	// AntiAliasingMethod(real r.AntiAliasingMethod, -1=leave as shipped), ScreenProbeDownsample,
+	// ScreenTraces, RadianceCache, TraceMeshSDFs, LumenState.
 	static const FQualityMode GQualityModes[] = {
-		{ TEXT("0 shadow=5 nanite=ON  aa=FXAA (current default)"), 5, 1, 1, 16, 1, 1, 0, -1 },
-		{ TEXT("1 shadow=1 nanite=ON  aa=FXAA (low shadow)"),      1, 1, 1, 16, 1, 1, 0, -1 },
-		{ TEXT("2 shadow=0 nanite=ON  aa=FXAA (shadows OFF)"),     0, 1, 1, 16, 1, 1, 0, -1 },
-		{ TEXT("3 shadow=5 nanite=off aa=FXAA (Nanite OFF)"),      5, 0, 1, 16, 1, 1, 0, -1 },
-		{ TEXT("4 shadow=5 nanite=ON  aa=MSAA"),                   5, 1, 3, 16, 1, 1, 0, -1 },
-		{ TEXT("5 shadow=5 nanite=ON  aa=TAA"),                    5, 1, 2, 16, 1, 1, 0, -1 },
-		{ TEXT("6 shadow=3 nanite=ON  aa=FXAA (medium shadow)"),   3, 1, 1, 16, 1, 1, 0, -1 },
-		{ TEXT("7 LUMEN BASELINE (everything else = mode 0's values, untouched Lumen defaults)"), 5, 1, 1, 16, 1, 1, 0, -1 },
-		{ TEXT("8 LUMEN probes 2x coarser (DownsampleFactor 32)"), 5, 1, 1, 32, 1, 1, 0, -1 },
-		{ TEXT("9 LUMEN probes 2x FINER -- control, should be WORSE not better"), 5, 1, 1, 8, 1, 1, 0, -1 },
-		{ TEXT("10 LUMEN screen traces OFF"),                      5, 1, 1, 16, 0, 1, 0, -1 },
-		{ TEXT("11 LUMEN radiance cache OFF"),                     5, 1, 1, 16, 1, 0, 0, -1 },
-		{ TEXT("12 LUMEN GI OFF -- see the difference!"),          5, 1, 1, 16, 1, 1, 0,  0 },
+		{ TEXT("0 shadow=5 nanite=ON  aa=FXAA (current default)"), 5, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("1 shadow=1 nanite=ON  aa=FXAA (low shadow)"),      1, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("2 shadow=0 nanite=ON  aa=FXAA (shadows OFF)"),     0, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("3 shadow=5 nanite=off aa=FXAA (Nanite OFF)"),      5, 0, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("4 shadow=5 nanite=ON  aa=MSAA"),                   5, 1, 3, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("5 shadow=5 nanite=ON  aa=TAA (r.Mobile only, inert on M5)"), 5, 1, 2, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("6 shadow=3 nanite=ON  aa=FXAA (medium shadow)"),   3, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("7 LUMEN BASELINE (everything else = mode 0's values, untouched Lumen defaults)"), 5, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("8 LUMEN probes 2x coarser (DownsampleFactor 32)"), 5, 1, 1, -1, 32, 1, 1, 0, -1 },
+		{ TEXT("9 LUMEN probes 2x FINER -- control, should be WORSE not better"), 5, 1, 1, -1, 8, 1, 1, 0, -1 },
+		{ TEXT("10 LUMEN screen traces OFF"),                      5, 1, 1, -1, 16, 0, 1, 0, -1 },
+		{ TEXT("11 LUMEN radiance cache OFF"),                     5, 1, 1, -1, 16, 1, 0, 0, -1 },
+		{ TEXT("12 LUMEN GI OFF -- see the difference!"),          5, 1, 1, -1, 16, 1, 1, 0,  0 },
+		{ TEXT("13 AA METHOD: TSR (real r.AntiAliasingMethod=4)"), 5, 1, 1,  4, 16, 1, 1, 0, -1 },
+		{ TEXT("14 AA METHOD: None (real r.AntiAliasingMethod=0)"), 5, 1, 1, 0, 16, 1, 1, 0, -1 },
 	};
 	static constexpr int32 GNumQualityModes = UE_ARRAY_COUNT(GQualityModes);
 }
@@ -202,6 +215,10 @@ void UPinchworkShowcaseSubsystem::ApplyQualityMode(int32 Mode)
 	const FQualityMode& M = GQualityModes[FMath::Clamp(Mode, 0, GNumQualityModes - 1)];
 	SetCVarInt(TEXT("r.ShadowQuality"), M.ShadowQuality);
 	SetCVarInt(TEXT("r.Nanite"), M.Nanite);
+	// -1 resolves to the actual shipped default (1=FXAA), not "leave whatever a prior mode set" --
+	// same predictable-revert convention as LumenState below, so cycling away from an AA-method
+	// mode always lands back on the known-good shipped state, not a stale value.
+	SetCVarInt(TEXT("r.AntiAliasingMethod"), M.AntiAliasingMethod == -1 ? 1 : M.AntiAliasingMethod);
 	SetCVarInt(TEXT("r.Mobile.AntiAliasing"), M.AntiAliasing);
 	SetCVarInt(TEXT("r.Lumen.ScreenProbeGather.DownsampleFactor"), M.ScreenProbeDownsample);
 	SetCVarInt(TEXT("r.Lumen.ScreenProbeGather.ScreenTraces"), M.ScreenTraces);
