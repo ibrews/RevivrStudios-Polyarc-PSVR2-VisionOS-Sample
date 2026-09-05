@@ -21,6 +21,19 @@ namespace
 	const TCHAR* GHMDRenderTargetCVarName = TEXT("xr.SecondaryScreenPercentage.HMDRenderTarget");
 }
 
+// 2026-09-05: opt-in, empty by default (no behavior change). See the header comment on
+// ReapplyProfilingOverrideCVars() for why this exists -- DeviceProfiles.ini wins against any
+// external cvar override for anything it manages, and this is the only way found so far to make
+// a specific cvar survive that push for a one-off profiling capture.
+static TAutoConsoleVariable<FString> CVarProfilingReapplyCVars(
+	TEXT("r.VisionOS.Profiling.ReapplyCVars"),
+	TEXT(""),
+	TEXT("Semicolon-separated name=value list of cvars to force back to these values, at\n")
+	TEXT("ECVF_SetByConsole priority, right after UWorld::BeginPlay (i.e. after DeviceProfile\n")
+	TEXT("push has already happened). Empty = no-op. Example:\n")
+	TEXT("-ini:Engine:[ConsoleVariables]:r.VisionOS.Profiling.ReapplyCVars=\"r.Lumen.ScreenProbeGather.DownsampleFactor=2\""),
+	ECVF_Default);
+
 void UHMDStatusSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -82,6 +95,44 @@ void UHMDStatusSubsystem::OnWorldPostInit(UWorld* World, const UWorld::Initializ
 	if (World && World->IsGameWorld())
 	{
 		World->OnWorldBeginPlay.AddUObject(this, &UHMDStatusSubsystem::ReapplyDeviceProfileHMDRenderTarget);
+		World->OnWorldBeginPlay.AddUObject(this, &UHMDStatusSubsystem::ReapplyProfilingOverrideCVars);
+	}
+}
+
+void UHMDStatusSubsystem::ReapplyProfilingOverrideCVars()
+{
+	static const TCHAR* CVarName = TEXT("r.VisionOS.Profiling.ReapplyCVars");
+	FString Pairs;
+	if (IConsoleVariable* ListCVar = IConsoleManager::Get().FindConsoleVariable(CVarName))
+	{
+		Pairs = ListCVar->GetString();
+	}
+	if (Pairs.IsEmpty())
+	{
+		return;
+	}
+
+	TArray<FString> Entries;
+	Pairs.ParseIntoArray(Entries, TEXT(";"), /*InCullEmpty=*/true);
+	for (const FString& Entry : Entries)
+	{
+		FString Name, Value;
+		if (!Entry.Split(TEXT("="), &Name, &Value))
+		{
+			UE_LOG(LogMyProjectHMD, Warning, TEXT("[ProfilingCVarReapply] malformed entry (expected name=value): %s"), *Entry);
+			continue;
+		}
+		Name.TrimStartAndEndInline();
+		Value.TrimStartAndEndInline();
+		if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(*Name))
+		{
+			CVar->Set(*Value, ECVF_SetByConsole);
+			UE_LOG(LogMyProjectHMD, Log, TEXT("[ProfilingCVarReapply] forced %s=%s (ECVF_SetByConsole) after DeviceProfile push"), *Name, *Value);
+		}
+		else
+		{
+			UE_LOG(LogMyProjectHMD, Warning, TEXT("[ProfilingCVarReapply] cvar not found: %s"), *Name);
+		}
 	}
 }
 

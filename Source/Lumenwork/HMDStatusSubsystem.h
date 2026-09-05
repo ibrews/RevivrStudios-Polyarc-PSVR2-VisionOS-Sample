@@ -49,5 +49,17 @@ private:
 	void OnWorldPostInit(UWorld* World, const UWorld::InitializationValues IVS);
 	void ReapplyDeviceProfileHMDRenderTarget();
 
+	// 2026-09-05: generalizes the HMDRenderTarget-Fix pattern above so a GPU profiling capture
+	// can force ANY cvar to survive DeviceProfiles.ini's post-init push, not just
+	// HMDRenderTarget. DeviceProfileManager pushes its own values for everything it manages
+	// AFTER early -ini:[ConsoleVariables] overrides apply (confirmed via
+	// lumenwork-device-profiles-log.md 2026-09-05 ~07:54 EDT entry: sg.GlobalIlluminationQuality
+	// and r.Lumen.ScreenProbeGather.DownsampleFactor overrides were both silently clobbered).
+	// Opt-in and off by default (empty string = no-op): pass
+	// -ini:Engine:[ConsoleVariables]:r.VisionOS.Profiling.ReapplyCVars="name1=value1;name2=value2"
+	// to force those exact cvars back to those exact values right after DeviceProfile push,
+	// at the same ECVF_SetByConsole priority HMDRenderTarget-Fix already proved wins.
+	void ReapplyProfilingOverrideCVars();
+
 	float DeviceProfileHMDRenderTarget = 0.f;
 };
