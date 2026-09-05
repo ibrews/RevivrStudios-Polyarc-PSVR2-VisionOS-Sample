@@ -24,6 +24,8 @@
 #include "RenderUtils.h"           // IsForwardShadingEnabled
 #include "VisionProGPUDetection.h" // runtime M2-vs-M5 GPU tier (Apple8 vs Apple9+)
 #include "Engine/PostProcessVolume.h" // runtime Lumen on/off override -- content-level, not console-variable-gated
+#include "Kismet/GameplayStatics.h" // PlaySound2D for the mode-change cue
+#include "Sound/SoundBase.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPinchworkShowcase, Log, All);
 
@@ -126,6 +128,7 @@ namespace
 		int32 ScreenTraces;          // r.Lumen.ScreenProbeGather.ScreenTraces (default 1; 0 skips the screen-space trace pass)
 		int32 RadianceCache;         // r.Lumen.ScreenProbeGather.RadianceCache (default 1; persistent world-space cache)
 		int32 TraceMeshSDFs;         // r.Lumen.TraceMeshSDFs (default 0 on this project already)
+		int32 LumenState;            // -1=leave as shipped (default), 0=force Lumen OFF, 1=force Lumen ON
 	};
 
 	// Mode 0 matches the shipping default so the app starts in its normal state.
@@ -141,19 +144,25 @@ namespace
 	// Mode 9 deliberately makes probes FINER (more expensive) as a sanity check on the measurement
 	// itself -- if mode 9 doesn't come back slower than mode 7, trust the methodology less, not
 	// just the knob.
+	// 2026-09-04 (2nd pass, Alex's TestFlight showcase request): added mode 12, LUMEN OFF -- a
+	// deliberate, dramatic before/after so testers pinky-pinching through modes see WHY this
+	// project exists. LumenState=-1 on every other mode leaves Lumen exactly as shipped (no
+	// override applied at all -- see ApplyLumenState's -1 branch), so none of the diagnostic modes
+	// above accidentally touch it.
 	static const FQualityMode GQualityModes[] = {
-		{ TEXT("0 shadow=5 nanite=ON  aa=FXAA (current default)"), 5, 1, 1, 16, 1, 1, 0 },
-		{ TEXT("1 shadow=1 nanite=ON  aa=FXAA (low shadow)"),      1, 1, 1, 16, 1, 1, 0 },
-		{ TEXT("2 shadow=0 nanite=ON  aa=FXAA (shadows OFF)"),     0, 1, 1, 16, 1, 1, 0 },
-		{ TEXT("3 shadow=5 nanite=off aa=FXAA (Nanite OFF)"),      5, 0, 1, 16, 1, 1, 0 },
-		{ TEXT("4 shadow=5 nanite=ON  aa=MSAA"),                   5, 1, 3, 16, 1, 1, 0 },
-		{ TEXT("5 shadow=5 nanite=ON  aa=TAA"),                    5, 1, 2, 16, 1, 1, 0 },
-		{ TEXT("6 shadow=3 nanite=ON  aa=FXAA (medium shadow)"),   3, 1, 1, 16, 1, 1, 0 },
-		{ TEXT("7 LUMEN BASELINE (everything else = mode 0's values, untouched Lumen defaults)"), 5, 1, 1, 16, 1, 1, 0 },
-		{ TEXT("8 LUMEN probes 2x coarser (DownsampleFactor 32)"), 5, 1, 1, 32, 1, 1, 0 },
-		{ TEXT("9 LUMEN probes 2x FINER -- control, should be WORSE not better"), 5, 1, 1, 8, 1, 1, 0 },
-		{ TEXT("10 LUMEN screen traces OFF"),                      5, 1, 1, 16, 0, 1, 0 },
-		{ TEXT("11 LUMEN radiance cache OFF"),                     5, 1, 1, 16, 1, 0, 0 },
+		{ TEXT("0 shadow=5 nanite=ON  aa=FXAA (current default)"), 5, 1, 1, 16, 1, 1, 0, -1 },
+		{ TEXT("1 shadow=1 nanite=ON  aa=FXAA (low shadow)"),      1, 1, 1, 16, 1, 1, 0, -1 },
+		{ TEXT("2 shadow=0 nanite=ON  aa=FXAA (shadows OFF)"),     0, 1, 1, 16, 1, 1, 0, -1 },
+		{ TEXT("3 shadow=5 nanite=off aa=FXAA (Nanite OFF)"),      5, 0, 1, 16, 1, 1, 0, -1 },
+		{ TEXT("4 shadow=5 nanite=ON  aa=MSAA"),                   5, 1, 3, 16, 1, 1, 0, -1 },
+		{ TEXT("5 shadow=5 nanite=ON  aa=TAA"),                    5, 1, 2, 16, 1, 1, 0, -1 },
+		{ TEXT("6 shadow=3 nanite=ON  aa=FXAA (medium shadow)"),   3, 1, 1, 16, 1, 1, 0, -1 },
+		{ TEXT("7 LUMEN BASELINE (everything else = mode 0's values, untouched Lumen defaults)"), 5, 1, 1, 16, 1, 1, 0, -1 },
+		{ TEXT("8 LUMEN probes 2x coarser (DownsampleFactor 32)"), 5, 1, 1, 32, 1, 1, 0, -1 },
+		{ TEXT("9 LUMEN probes 2x FINER -- control, should be WORSE not better"), 5, 1, 1, 8, 1, 1, 0, -1 },
+		{ TEXT("10 LUMEN screen traces OFF"),                      5, 1, 1, 16, 0, 1, 0, -1 },
+		{ TEXT("11 LUMEN radiance cache OFF"),                     5, 1, 1, 16, 1, 0, 0, -1 },
+		{ TEXT("12 LUMEN GI OFF -- see the difference!"),          5, 1, 1, 16, 1, 1, 0,  0 },
 	};
 	static constexpr int32 GNumQualityModes = UE_ARRAY_COUNT(GQualityModes);
 }
@@ -198,6 +207,8 @@ void UPinchworkShowcaseSubsystem::ApplyQualityMode(int32 Mode)
 	SetCVarInt(TEXT("r.Lumen.ScreenProbeGather.ScreenTraces"), M.ScreenTraces);
 	SetCVarInt(TEXT("r.Lumen.ScreenProbeGather.RadianceCache"), M.RadianceCache);
 	SetCVarInt(TEXT("r.Lumen.TraceMeshSDFs"), M.TraceMeshSDFs);
+	ApplyLumenState(M.LumenState);
+	PlayModeChangeSound();
 	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] -> %s"), M.Name);
 	if (GLog) { GLog->Flush(); }   // forced flush: this log is the record of what was on screen
 }
@@ -266,10 +277,43 @@ static TAutoConsoleVariable<int32> CVarLumenOverride(
 
 void UPinchworkShowcaseSubsystem::UpdateLumenOverride()
 {
-	const int32 Wanted = CVarLumenOverride.GetValueOnGameThread();
+	ApplyLumenState(CVarLumenOverride.GetValueOnGameThread());
+}
+
+void UPinchworkShowcaseSubsystem::PlayModeChangeSound()
+{
+	// Load once, lazily -- ConstructorHelpers::FObjectFinder can't be used here (this isn't a
+	// constructor), so LoadObject follows the same convention TryWire() already uses for the demo
+	// cube's mesh/material. Reusing StarterContent/Audio/Light01_Cue (already force-cooked into
+	// this project per Config/DefaultGame.ini's DirectoriesToAlwaysCook) rather than adding a new
+	// asset -- also a fitting cue thematically (a "light" sound for a Lumen toggle).
+	if (!bModeChangeSoundLoadAttempted)
+	{
+		bModeChangeSoundLoadAttempted = true;
+		ModeChangeSound = LoadObject<USoundBase>(nullptr, TEXT("/Game/StarterContent/Audio/Light01_Cue.Light01_Cue"));
+		if (!ModeChangeSound.IsValid())
+		{
+			UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] mode-change sound failed to load -- continuing silently"));
+		}
+	}
+
+	if (USoundBase* Sound = ModeChangeSound.Get())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			UGameplayStatics::PlaySound2D(World, Sound);
+		}
+	}
+}
+
+// Shared by the debug cvar path (UpdateLumenOverride, above) and the showcase quality-mode cycler
+// (ApplyQualityMode, below) -- both need "force Lumen on/off/shipped-default", just triggered
+// differently (a console var for dev use, a pinky-pinch mode step for testers).
+void UPinchworkShowcaseSubsystem::ApplyLumenState(int32 Wanted)
+{
 	if (Wanted == LastAppliedLumenOverride)
 	{
-		return; // no change since last tick -- avoid respawning/rewriting every frame
+		return; // no change since last call -- avoid respawning/rewriting every frame
 	}
 
 	UWorld* World = GetWorld();
