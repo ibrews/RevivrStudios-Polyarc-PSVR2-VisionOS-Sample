@@ -545,6 +545,13 @@ void UPinchworkShowcaseSubsystem::Showcase_OnPinkyPinch()
 	LastQualityModeChangeTime = Now;
 	QualityMode = (QualityMode + 1) % GNumQualityModes;
 	ApplyQualityMode(QualityMode);
+	// Greppable confirmation line -- Showcase_OnPinkyPinch/OnRingPinch previously had no direct log
+	// output of their own (only the downstream QUALITYMODE/ALPHAMODE effect logged), so a device-log
+	// grep for "Showcase_On.*Pinch" (the on-device verification recipe for e0c110f) could never match
+	// anything. This also can't distinguish a real pinch from VRPawn_HandWorldControl's scripted hand
+	// demo (5c3716b), which calls this same BlueprintCallable entry point -- run with
+	// -ExecCmds="r.VisionOS.Showcase.DisableScriptedInput 1" to rule the scripted demo out first.
+	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[GESTURE] Showcase_OnPinkyPinch fired -> QualityMode=%d"), QualityMode);
 }
 
 void UPinchworkShowcaseSubsystem::Showcase_OnRingPinch()
@@ -557,6 +564,8 @@ void UPinchworkShowcaseSubsystem::Showcase_OnRingPinch()
 	LastAlphaModeChangeTime = Now;
 	AlphaMode = NextReachableAlphaMode(AlphaMode);
 	ApplyAlphaMode(AlphaMode);
+	// See the matching comment in Showcase_OnPinkyPinch() above.
+	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[GESTURE] Showcase_OnRingPinch fired -> AlphaMode=%d"), AlphaMode);
 }
 
 bool UPinchworkShowcaseSubsystem::TryWire()
