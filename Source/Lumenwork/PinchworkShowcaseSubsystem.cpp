@@ -35,14 +35,17 @@ DEFINE_LOG_CATEGORY_STATIC(LogPinchworkShowcase, Log, All);
 // into one mode step per 0.5s -- great for an unattended showcase, but it means a build launched
 // with -csvGpuStats captures the GPU cost of continuously cycling render modes, not a stable
 // config, and it makes manual on-device A/B testing (e.g. comparing two AA methods by eye)
-// impossible to hold still. Defaulted to 1 (disabled) 2026-09-05 after `-ExecCmds=
-// "r.VisionOS.Showcase.DisableScriptedInput 1"` proved unreliable to deliver via `devicectl device
-// process launch` (several quoting/multi-flag variants all failed to actually change the running
-// cvar) -- baking the default in source sidesteps that delivery problem entirely. Set to 0 on the
-// command line for the old unattended-showcase behavior if that's ever needed again.
+// impossible to hold still. 2026-09-05: briefly defaulted this to 1, which was WRONG -- this cvar
+// gates the SHARED Showcase_OnPinkyPinch/OnRingPinch entry point that both the scripted demo AND a
+// real physical pinch call through (see e0c110f), so defaulting it to disabled silently broke real
+// pinch input too (caught when Alex reported "ring and pinky aren't working" after a build with
+// the default flipped). Reverted to 0 (scripted input enabled by default, matching shipped
+// behavior) same day. If you need to isolate a real pinch from the scripted demo for testing, set
+// this to 1 on the command line for that session only -- do NOT change the default again without
+// also fixing the scripted demo to call a SEPARATE, non-gated entry point.
 static TAutoConsoleVariable<int32> CVarShowcaseDisableScriptedInput(
 	TEXT("r.VisionOS.Showcase.DisableScriptedInput"),
-	1,
+	0,
 	TEXT("1 disables Showcase_OnPinkyPinch/OnRingPinch mode-stepping (quality + alpha cyclers).\n")
 	TEXT("Use during automated GPU profiling captures so a scripted hand demo's pinch doesn't\n")
 	TEXT("confound the measurement with continuous mode cycling. 0 = normal showcase behavior."),
