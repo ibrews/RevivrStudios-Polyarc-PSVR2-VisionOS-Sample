@@ -166,10 +166,10 @@ bcr() {  # shared BuildCookRun — render config comes from the project's commit
     "$UAT" BuildCookRun -project="$PROJECT" -target="$TARGET" -platform=VisionOS \
       -clientconfig="$CLIENTCONFIG" -cook -stage -pak -skipbuild \
       -unrealexe="$UE_ROOT/Engine/Binaries/Mac/UnrealEditor-Cmd" \
-      -nocompileeditor -skipbuildeditor -nop4 -unattended -nopause -utf8output "$@"
+      -nocompileeditor -skipbuildeditor -nop4 -unattended -nopause -utf8output -WaitForUATMutex "$@"
   else
     "$UAT" BuildCookRun -project="$PROJECT" -target="$TARGET" -platform=VisionOS \
-      -clientconfig="$CLIENTCONFIG" -build -cook -stage -pak -package -nop4 -unattended -nopause -utf8output "$@"
+      -clientconfig="$CLIENTCONFIG" -build -cook -stage -pak -package -nop4 -unattended -nopause -utf8output -WaitForUATMutex "$@"
   fi
   verify_log_or_fail
 }
