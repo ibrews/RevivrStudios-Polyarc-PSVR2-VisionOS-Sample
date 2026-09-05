@@ -93,22 +93,61 @@ namespace
 		const TCHAR* Name;
 		int32 InlineInvert;   // r.Mobile.VisionOS.InlineAlphaInvert
 		int32 StockPass;      // r.AlphaInvertPass
-		int32 PropagateAlpha; // r.Mobile.PropagateAlpha
+		// r.Mobile.PropagateAlpha -- NOTE (2026-09-05): confirmed ECVF_ReadOnly in
+		// MobileBasePassRendering.cpp. Calling Set() on it at runtime is a silent no-op (UE logs a
+		// warning, does not apply the value) -- it has never actually done anything in this cycler.
+		// Harmless here only because every reachable mode (1, 3) already shares the same value (1);
+		// don't add a mode that relies on this field differing between reachable entries, it won't
+		// take effect. Changing PropagateAlpha for real needs a cook-time/.ini change, not a cycle.
+		int32 PropagateAlpha;
+		// r.BackbufferQuantizationDitheringOverride -- EXPERIMENTAL, added 2026-09-05 for Alex's
+		// "stepped alpha artifacts" report. 0 = engine default (auto-detects bitdepth from the
+		// backbuffer format). Verified in PostProcessTonemap.cpp: ECVF_RenderThreadSafe (genuinely
+		// runtime-cyclable) -- but ALSO verified in PostProcessTonemap.usf that this dithering is
+		// applied to OutColor.rgb ONLY, never .a. So this is NOT a confirmed fix for alpha-channel
+		// stepping specifically -- it's here as a cheap, safe thing to try live (RGB dithering can
+		// still change how banding READS perceptually in a passthrough-composited view even if it
+		// never touches the alpha value itself). If cycling through modes 5/6 below doesn't visibly
+		// help, the real fix is more likely the XR swapchain's own alpha bit-depth/format, which
+		// lives outside this file (OpenXRVisionOS plugin / compositor swapchain setup) -- not yet
+		// investigated.
+		int32 DitherOverride;
 	};
 
 	// On-device verification (M5/Lumen, 2026-09-02): modes 0, 2, and 4 all render everything
 	// semi-transparent -- wrong. Only modes 1 and 3 look correct. Mode 1 (Epic stock pass) is now
-	// the shipping default below, and the ring-thumb-pinch cycler alternates 1<->3 only -- it never
-	// lands on 0, 2, or 4. All 5 entries and their exact Name strings stay intact: other
-	// tooling/logs reference them by index and name -- this only changes which ones are reachable.
+	// the shipping default below. All 5 original entries and their exact Name strings stay intact:
+	// other tooling/logs reference them by index and name. Modes 5/6 (2026-09-05) are NEW, added to
+	// the reachable cycle alongside 1/3 -- see DitherOverride comment above for what they actually
+	// test and why they're not a guaranteed fix.
 	static const FAlphaMode GAlphaModes[] = {
-		{ TEXT("0 inline=ON  stock=off alpha=ON  (current default)"), 1, 0, 1 },
-		{ TEXT("1 inline=off stock=ON  alpha=ON  (Epic stock pass)"), 0, 1, 1 },
-		{ TEXT("2 inline=off stock=off alpha=ON  (NO inversion)"),    0, 0, 1 },
-		{ TEXT("3 inline=ON  stock=ON  alpha=ON  (both - expect double-invert)"), 1, 1, 1 },
-		{ TEXT("4 inline=off stock=off alpha=off (no passthrough blend)"), 0, 0, 0 },
+		{ TEXT("0 inline=ON  stock=off alpha=ON  (current default)"), 1, 0, 1, 0 },
+		{ TEXT("1 inline=off stock=ON  alpha=ON  (Epic stock pass)"), 0, 1, 1, 0 },
+		{ TEXT("2 inline=off stock=off alpha=ON  (NO inversion)"),    0, 0, 1, 0 },
+		{ TEXT("3 inline=ON  stock=ON  alpha=ON  (both - expect double-invert)"), 1, 1, 1, 0 },
+		{ TEXT("4 inline=off stock=off alpha=off (no passthrough blend)"), 0, 0, 0, 0 },
+		{ TEXT("5 = mode 1 + dither override 8-bit (EXPERIMENTAL, RGB-only, see comment)"), 0, 1, 1, 8 },
+		{ TEXT("6 = mode 1 + dither override 6-bit, stronger (EXPERIMENTAL, RGB-only)"),    0, 1, 1, 6 },
 	};
 	static constexpr int32 GNumAlphaModes = UE_ARRAY_COUNT(GAlphaModes);
+	// Ring-pinch cycles through exactly these, in this order -- never lands on the confirmed-wrong
+	// 0/2/4. Extend this array (not the struct layout) to add more reachable candidates later.
+	static const int32 GReachableAlphaModes[] = { 1, 3, 5, 6 };
+	static constexpr int32 GNumReachableAlphaModes = UE_ARRAY_COUNT(GReachableAlphaModes);
+
+	// Shared by the tick-based ring-pinch path and Showcase_OnRingPinch() (Blueprint entry point)
+	// so both step through the exact same reachable set in the exact same order.
+	static int32 NextReachableAlphaMode(int32 Current)
+	{
+		for (int32 i = 0; i < GNumReachableAlphaModes; ++i)
+		{
+			if (GReachableAlphaModes[i] == Current)
+			{
+				return GReachableAlphaModes[(i + 1) % GNumReachableAlphaModes];
+			}
+		}
+		return GReachableAlphaModes[0]; // Current wasn't a reachable mode (e.g. still at the 0 default) -- start the cycle.
+	}
 
 	static void SetCVarInt(const TCHAR* Name, int32 Value)
 	{
@@ -186,7 +225,8 @@ void UPinchworkShowcaseSubsystem::ApplyAlphaMode(int32 Mode)
 	const FAlphaMode& M = GAlphaModes[FMath::Clamp(Mode, 0, GNumAlphaModes - 1)];
 	SetCVarInt(TEXT("r.Mobile.VisionOS.InlineAlphaInvert"), M.InlineInvert);
 	SetCVarInt(TEXT("r.AlphaInvertPass"), M.StockPass);
-	SetCVarInt(TEXT("r.Mobile.PropagateAlpha"), M.PropagateAlpha);
+	SetCVarInt(TEXT("r.Mobile.PropagateAlpha"), M.PropagateAlpha); // no-op, ECVF_ReadOnly -- see FAlphaMode comment
+	SetCVarInt(TEXT("r.BackbufferQuantizationDitheringOverride"), M.DitherOverride);
 	UE_LOG(LogPinchworkShowcase, Warning, TEXT("[ALPHAMODE] -> %s"), M.Name);
 	if (GLog) { GLog->Flush(); }   // forced flush: this log is the record of what was on screen
 }
@@ -202,10 +242,9 @@ void UPinchworkShowcaseSubsystem::UpdateAlphaModeCycler()
 	if (bRing && !bPrevRingPinch && (Now - LastAlphaModeChangeTime) > 0.5)
 	{
 		LastAlphaModeChangeTime = Now;
-		// On-device verification showed only modes 1 (Epic stock pass) and 3 (both -- double-invert)
-		// render correctly; 0, 2, and 4 all put everything in semitransparency. Toggle between just
-		// those two rather than stepping the full GNumAlphaModes range.
-		AlphaMode = (AlphaMode == 1) ? 3 : 1;
+		// Cycles GReachableAlphaModes (currently 1, 3, 5, 6) -- see that array's comment. Never
+		// lands on the confirmed-wrong 0/2/4.
+		AlphaMode = NextReachableAlphaMode(AlphaMode);
 		ApplyAlphaMode(AlphaMode);
 	}
 	bPrevRingPinch = bRing;
@@ -493,11 +532,11 @@ void UPinchworkShowcaseSubsystem::Showcase_OnPinkyPinch()
 
 void UPinchworkShowcaseSubsystem::Showcase_OnRingPinch()
 {
-	// Same debounce window and mode toggle as UpdateAlphaModeCycler() above.
+	// Same debounce window and mode cycling as UpdateAlphaModeCycler() above.
 	const double Now = FPlatformTime::Seconds();
 	if ((Now - LastAlphaModeChangeTime) <= 0.5) { return; }
 	LastAlphaModeChangeTime = Now;
-	AlphaMode = (AlphaMode == 1) ? 3 : 1;
+	AlphaMode = NextReachableAlphaMode(AlphaMode);
 	ApplyAlphaMode(AlphaMode);
 }
 
