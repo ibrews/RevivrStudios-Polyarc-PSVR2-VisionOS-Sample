@@ -28,7 +28,7 @@
 
 class UHandTrackingComponent;
 
-UCLASS()
+UCLASS(BlueprintType)
 class LUMENWORK_API UPinchworkShowcaseSubsystem : public UTickableWorldSubsystem
 {
 	GENERATED_BODY()
@@ -38,6 +38,19 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override;
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
+
+	// Alternate entry points into the SAME mode-cycling logic the pinky/ring pinch normally drives,
+	// for a pawn (e.g. VRPawn_HandWorldControl) that has no UHandTrackingComponent -- TryWire() can
+	// never succeed there (confirmed via [WIREDIAG] on-device, 2026-09-05: hand_components=0), since
+	// that pawn does its own hand interaction via HandBonesTouchCheck/EHandKeypoint instead. Call
+	// these from that Blueprint's own rising-edge gesture check ("Get World Subsystem" node ->
+	// Pinchwork Showcase Subsystem -> Showcase On Pinky/Ring Pinch). Debounced internally with the
+	// same 0.5s window as the native pinch path, so it's safe to call every tick while touching.
+	UFUNCTION(BlueprintCallable, Category = "Pinchwork Showcase")
+	void Showcase_OnPinkyPinch();
+
+	UFUNCTION(BlueprintCallable, Category = "Pinchwork Showcase")
+	void Showcase_OnRingPinch();
 
 private:
 	// Find the player pawn's two hand components + spawn the demo cube. Retried

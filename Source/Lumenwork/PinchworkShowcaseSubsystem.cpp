@@ -479,6 +479,28 @@ void UPinchworkShowcaseSubsystem::UpdateQualityModeCycler()
 	bPrevPinkyPinch = bPinky;
 }
 
+void UPinchworkShowcaseSubsystem::Showcase_OnPinkyPinch()
+{
+	// Same debounce window as UpdateQualityModeCycler() above -- callers are expected to invoke this
+	// on every tick a Blueprint's own touch-check reports true, not just on the rising edge, so the
+	// debounce here is what turns a held pinch into exactly one mode step.
+	const double Now = FPlatformTime::Seconds();
+	if ((Now - LastQualityModeChangeTime) <= 0.5) { return; }
+	LastQualityModeChangeTime = Now;
+	QualityMode = (QualityMode + 1) % GNumQualityModes;
+	ApplyQualityMode(QualityMode);
+}
+
+void UPinchworkShowcaseSubsystem::Showcase_OnRingPinch()
+{
+	// Same debounce window and mode toggle as UpdateAlphaModeCycler() above.
+	const double Now = FPlatformTime::Seconds();
+	if ((Now - LastAlphaModeChangeTime) <= 0.5) { return; }
+	LastAlphaModeChangeTime = Now;
+	AlphaMode = (AlphaMode == 1) ? 3 : 1;
+	ApplyAlphaMode(AlphaMode);
+}
+
 bool UPinchworkShowcaseSubsystem::TryWire()
 {
 	// 2026-09-05 diagnostic (throttled to ~1/sec -- this is called every tick until it succeeds):
