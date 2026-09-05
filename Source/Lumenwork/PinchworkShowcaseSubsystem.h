@@ -115,8 +115,16 @@ private:
 	// toggle Lumen off at runtime in one binary -- spawns one unbound, high-priority
 	// APostProcessVolume on first use and flips its override each time the cvar changes.
 	void UpdateLumenOverride();
+	void ApplyLumenState(int32 Wanted); // -1=shipped default, 0=off, 1=on -- shared with ApplyQualityMode
 	TWeakObjectPtr<class APostProcessVolume> LumenOverrideVolume;
 	int32 LastAppliedLumenOverride = -2; // sentinel distinct from the cvar's own -1/0/1 range
+
+	// Plays once per mode change (pinky-pinch step or auto-cycle step) so a wearer/tester notices
+	// the change even if they're not staring at the HUD text. 2026-09-04, Alex's request for the
+	// TestFlight showcase build -- "so people know to look for a change."
+	void PlayModeChangeSound();
+	TWeakObjectPtr<class USoundBase> ModeChangeSound;
+	bool bModeChangeSoundLoadAttempted = false;
 
 	// Per-hand committed pinch point (thumb-index midpoint) in world space, and
 	// whether that hand is currently pinching. Returns false if untracked.
