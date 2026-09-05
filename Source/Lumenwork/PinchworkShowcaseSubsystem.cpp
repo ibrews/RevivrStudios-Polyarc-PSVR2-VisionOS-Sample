@@ -161,13 +161,13 @@ namespace
 	// AntiAliasingMethod(real r.AntiAliasingMethod, -1=leave as shipped), ScreenProbeDownsample,
 	// ScreenTraces, RadianceCache, TraceMeshSDFs, LumenState.
 	static const FQualityMode GQualityModes[] = {
-		{ TEXT("0 shadow=5 nanite=ON  aa=FXAA (current default)"), 5, 1, 1, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("1 shadow=1 nanite=ON  aa=FXAA (low shadow)"),      1, 1, 1, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("2 shadow=0 nanite=ON  aa=FXAA (shadows OFF)"),     0, 1, 1, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("3 shadow=5 nanite=off aa=FXAA (Nanite OFF)"),      5, 0, 1, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("4 shadow=5 nanite=ON  aa=MSAA"),                   5, 1, 3, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("5 shadow=5 nanite=ON  aa=TAA (r.Mobile only, inert on M5)"), 5, 1, 2, -1, 16, 1, 1, 0, -1 },
-		{ TEXT("6 shadow=3 nanite=ON  aa=FXAA (medium shadow)"),   3, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("0 shadow=5 nanite=ON (inert on M5) aa=FXAA (current default)"), 5, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("1 shadow=1 nanite=ON (inert on M5) aa=FXAA (low shadow)"),      1, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("2 shadow=0 nanite=ON (inert on M5) aa=FXAA (shadows OFF)"),     0, 1, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("3 shadow=5 nanite=off (inert on M5, unsupported on METAL_SM5_IOS) aa=FXAA"),      5, 0, 1, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("4 shadow=5 nanite=ON (inert on M5) aa=MSAA"),                   5, 1, 3, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("5 shadow=5 nanite=ON (inert on M5) aa=TAA (r.Mobile only, also inert on M5)"), 5, 1, 2, -1, 16, 1, 1, 0, -1 },
+		{ TEXT("6 shadow=3 nanite=ON (inert on M5) aa=FXAA (medium shadow)"),   3, 1, 1, -1, 16, 1, 1, 0, -1 },
 		{ TEXT("7 LUMEN BASELINE (everything else = mode 0's values, untouched Lumen defaults)"), 5, 1, 1, -1, 16, 1, 1, 0, -1 },
 		{ TEXT("8 LUMEN probes 2x coarser (DownsampleFactor 32)"), 5, 1, 1, -1, 32, 1, 1, 0, -1 },
 		{ TEXT("9 LUMEN probes 2x FINER -- control, should be WORSE not better"), 5, 1, 1, -1, 8, 1, 1, 0, -1 },
@@ -312,12 +312,21 @@ void UPinchworkShowcaseSubsystem::PlayModeChangeSound()
 		{
 			UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] mode-change sound failed to load -- continuing silently"));
 		}
+		else
+		{
+			// 2026-09-05 diagnostic: Alex reported no audible sound despite no load failure. Log the
+			// actual duration/volume so the next device log confirms whether PlaySound2D is even
+			// being reached with a sane asset, rather than guessing at audio routing blind.
+			UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] mode-change sound loaded: duration=%.2fs"),
+				ModeChangeSound->GetDuration());
+		}
 	}
 
 	if (USoundBase* Sound = ModeChangeSound.Get())
 	{
 		if (UWorld* World = GetWorld())
 		{
+			UE_LOG(LogPinchworkShowcase, Warning, TEXT("[QUALITYMODE] PlaySound2D called"));
 			UGameplayStatics::PlaySound2D(World, Sound);
 		}
 	}
@@ -447,14 +456,38 @@ void UPinchworkShowcaseSubsystem::UpdateQualityModeCycler()
 
 bool UPinchworkShowcaseSubsystem::TryWire()
 {
+	// 2026-09-05 diagnostic (throttled to ~1/sec -- this is called every tick until it succeeds):
+	// Alex reported pinky/ring pinch not working and disputed the (wrong -- see commit) theory that
+	// BP_XRPawn is the active pawn. Rather than guess again, log the ACTUAL pawn class and
+	// UHandTrackingComponent count so the next device log pull answers this directly.
+	static double LastWireDiagLogTime = -1000.0;
+	const double NowDiag = FPlatformTime::Seconds();
+	const bool bShouldLogDiag = (NowDiag - LastWireDiagLogTime) > 1.0;
+
 	UWorld* World = GetWorld();
 	if (!World) { return false; }
 	APlayerController* PC = World->GetFirstPlayerController();
 	APawn* Pawn = PC ? PC->GetPawn() : nullptr;
-	if (!Pawn) { return false; } // VR pawn spawns after world begin — retry next tick
+	if (!Pawn)
+	{
+		if (bShouldLogDiag)
+		{
+			LastWireDiagLogTime = NowDiag;
+			UE_LOG(LogPinchworkShowcase, Warning, TEXT("[WIREDIAG] no pawn yet (PC=%s)"), PC ? TEXT("valid") : TEXT("null"));
+			if (GLog) { GLog->Flush(); }
+		}
+		return false; // VR pawn spawns after world begin — retry next tick
+	}
 
 	TArray<UHandTrackingComponent*> Hands;
 	Pawn->GetComponents<UHandTrackingComponent>(Hands);
+	if (bShouldLogDiag)
+	{
+		LastWireDiagLogTime = NowDiag;
+		UE_LOG(LogPinchworkShowcase, Warning, TEXT("[WIREDIAG] pawn=%s class=%s hand_components=%d"),
+			*Pawn->GetName(), *Pawn->GetClass()->GetName(), Hands.Num());
+		if (GLog) { GLog->Flush(); }
+	}
 	if (Hands.Num() < 2) { return false; }
 	for (UHandTrackingComponent* H : Hands)
 	{
