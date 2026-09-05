@@ -113,11 +113,11 @@ UHandSkeletalDriverComponent::UHandSkeletalDriverComponent()
 	// references these via the controller-attached HandLeft/HandRight, so
 	// they're guaranteed to be in the cooked package.
 	static ConstructorHelpers::FObjectFinderOptional<USkeletalMesh> LeftFinder(
-		TEXT("/Game/Characters/MannequinsXR/Meshes/SKM_MannyXR_left.SKM_MannyXR_left"));
+		TEXT("/Game/XRMannequins/Meshes/SKM_MannyXR_left.SKM_MannyXR_left"));
 	DefaultLeftMesh = LeftFinder.Get();
 
 	static ConstructorHelpers::FObjectFinderOptional<USkeletalMesh> RightFinder(
-		TEXT("/Game/Characters/MannequinsXR/Meshes/SKM_MannyXR_right.SKM_MannyXR_right"));
+		TEXT("/Game/XRMannequins/Meshes/SKM_MannyXR_right.SKM_MannyXR_right"));
 	DefaultRightMesh = RightFinder.Get();
 
 	// Engine WireframeMaterial is intrinsically two-sided (wireframe has no

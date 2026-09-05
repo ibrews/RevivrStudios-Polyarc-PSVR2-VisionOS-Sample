@@ -11,9 +11,10 @@
 		}
 	],
 	"Plugins": [
+		{ "Name": "XrsimAgent", "Enabled": true },
 		{
 			"Name": "ECABridge",
-			"Enabled": false,
+			"Enabled": true,
 			"SupportedTargetPlatforms": [
 				"Mac",
 				"Win64",

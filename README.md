@@ -16,6 +16,12 @@ retired — see its `RETIRED-DO-NOT-BUILD.md`.
 
 ## Things to Try
 
+**Test hand interactions without a headset:** the opt-in `XrsimAgent` editor
+plugin accepts AI-friendly JSON hand timelines. The existing Blueprint pawn
+detects pinches and performs the real grab/release/physics throw. See the
+[hand-testing and recording guide](docs/xrsim-hands.md) for setup, the three
+acceptance controls, original Manny XR meshes, and a spectator recording recipe.
+
 1. **Build and deploy to Apple Vision Pro.**
    `./ue-avp-build.sh device` then install with `xcrun devicectl device install app`.
    Expect the documented `Touch UBT generated tiles` finalize bug — the fix is to re-run the

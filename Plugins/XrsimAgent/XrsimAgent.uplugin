@@ -1,0 +1,8 @@
+{
+  "FileVersion": 3, "Version": 1, "VersionName": "0.1",
+  "FriendlyName": "Xrsim hand test adapter", "Category": "Testing",
+  "Description": "Opt-in simulated IHandTracker input and read-only gameplay evidence for AI-driven VR Preview tests.",
+  "EnabledByDefault": false, "CanContainContent": false,
+  "Modules": [{ "Name": "XrsimAgent", "Type": "Editor", "LoadingPhase": "PostEngineInit" }],
+  "Plugins": [{ "Name": "XRBase", "Enabled": true }]
+}

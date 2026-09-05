@@ -1,5 +1,12 @@
 # Pinchwork
 
+The shared default hand meshes are the original Manny XR pair at
+`/Game/XRMannequins/Meshes/SKM_MannyXR_left` and `SKM_MannyXR_right`.
+Vision Pro rotation compensation is handled by the engine fork; use the original
+meshes across platforms, not a separately rotated Vision Pro asset variant.
+For scripted desktop VR Preview and visible grab/throw recording, see
+[the Lumenwork hand-testing guide](../../docs/xrsim-hands.md).
+
 **An OpenXR hand-tracking and gesture system for Unreal Engine.** Drop it into any UE project to get per-finger pinch detection, curl-pattern gesture recognition with per-user calibration, pinch-to-grab with throw physics, and gesture → Enhanced Input injection — built and tuned on Apple Vision Pro, and portable to any OpenXR hand-tracking runtime.
 
 Pinchwork is a self-contained plugin: it depends only on Epic's OpenXR / Enhanced Input modules and ships none of your project's code. Add the components to a pawn and bind the events.
