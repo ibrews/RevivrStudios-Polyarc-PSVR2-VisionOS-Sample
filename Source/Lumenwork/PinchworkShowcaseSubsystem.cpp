@@ -34,12 +34,15 @@ DEFINE_LOG_CATEGORY_STATIC(LogPinchworkShowcase, Log, All);
 // every tick its own touch-check reports true, relying on the 0.5s debounce below to turn that
 // into one mode step per 0.5s -- great for an unattended showcase, but it means a build launched
 // with -csvGpuStats captures the GPU cost of continuously cycling render modes, not a stable
-// config. Off by default (0 = unchanged behavior); set to 1 on the command line
-// (-ExecCmds="r.VisionOS.Showcase.DisableScriptedInput 1") for a profiling capture that needs a
-// fixed mode for the whole run.
+// config, and it makes manual on-device A/B testing (e.g. comparing two AA methods by eye)
+// impossible to hold still. Defaulted to 1 (disabled) 2026-09-05 after `-ExecCmds=
+// "r.VisionOS.Showcase.DisableScriptedInput 1"` proved unreliable to deliver via `devicectl device
+// process launch` (several quoting/multi-flag variants all failed to actually change the running
+// cvar) -- baking the default in source sidesteps that delivery problem entirely. Set to 0 on the
+// command line for the old unattended-showcase behavior if that's ever needed again.
 static TAutoConsoleVariable<int32> CVarShowcaseDisableScriptedInput(
 	TEXT("r.VisionOS.Showcase.DisableScriptedInput"),
-	0,
+	1,
 	TEXT("1 disables Showcase_OnPinkyPinch/OnRingPinch mode-stepping (quality + alpha cyclers).\n")
 	TEXT("Use during automated GPU profiling captures so a scripted hand demo's pinch doesn't\n")
 	TEXT("confound the measurement with continuous mode cycling. 0 = normal showcase behavior."),
