@@ -41,6 +41,7 @@ BUNDLE_ID="${BUNDLE_ID:-}"                 # blank = auto-detect from the packag
 SIM_UDID="${SIM_UDID:-}"                  # blank = auto-pick a visionOS sim
 DEVICE_ID="${DEVICE_ID:-}"                # blank = auto-pick a connected AVP (or set explicitly)
 DEVICE_TEAM="${DEVICE_TEAM:-C624J4S2F8}"  # Agile Lens LLC — sign com.agilelens.* / AVP builds with this team
+EXPECTED_DEVICE_BUNDLE_ID="${EXPECTED_DEVICE_BUNDLE_ID:-com.agilelens.lumenwork.MyProject}"
 # --------------------------------------------------------------------------------
 
 UAT="$UE_ROOT/Engine/Build/BatchFiles/RunUAT.sh"
@@ -215,6 +216,13 @@ case "$MODE" in
     # Device = arm64 (no -clientarchitecture). Agile Lens signing. Immersive apps can't be remote-launched → tap.
     bcr "-ini:Engine:[/Script/MacTargetPlatform.XcodeProjectSettings]:CodeSigningTeam=$DEVICE_TEAM"
     APP="$(newest_app)"
+    ACTUAL_DEVICE_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist" 2>/dev/null || true)"
+    if [ "$ACTUAL_DEVICE_BUNDLE_ID" != "$EXPECTED_DEVICE_BUNDLE_ID" ]; then
+        echo "[ue-avp-build] REFUSING INSTALL: packaged identity '$ACTUAL_DEVICE_BUNDLE_ID' does not equal expected Lumenwork identity '$EXPECTED_DEVICE_BUNDLE_ID'." >&2
+        echo "[ue-avp-build] Light Pavilion owns com.agilelens.lumenwork.Lumenwork; never install that identity from this project." >&2
+        echo "[ue-avp-build] Rebrand and re-sign a copy as $EXPECTED_DEVICE_BUNDLE_ID, verify it, then install the verified copy explicitly." >&2
+        exit 1
+    fi
     # 2026-09-03: this auto-detect was doubly broken and FAILED SILENTLY.
     #  1. The old regex was a UUID pattern (8-4-4-4-12). Apple Vision Pro UDIDs are ECID format
     #     (8-16, e.g. 00008142-000468E83409401C), so it matched NOTHING -> DEV_ID empty ->
