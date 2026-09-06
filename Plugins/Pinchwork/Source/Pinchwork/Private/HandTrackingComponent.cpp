@@ -460,6 +460,9 @@ void UHandTrackingComponent::NotifyPinchGrab(bool bPressed)
 	// AT THE PINCH POINT (thumb-index midpoint), not the wrist. On release: throw it
 	// with the hand's velocity. The held object rides PinchAnchor (kept on the pinch
 	// point each Tick by UpdateHeldActorFollow).
+	UE_LOG(LogTemp, Warning, TEXT("[Pinchwork-Pinch] hand=%s transition=%s route=native_index_thumb"),
+		bIsRight ? TEXT("right") : TEXT("left"), bPressed ? TEXT("pressed") : TEXT("released"));
+	if (GLog) { GLog->Flush(); }
 	if (bPressed)
 	{
 		TryPinchGrab(CurrentPinchMidpoint);
@@ -538,6 +541,9 @@ void UHandTrackingComponent::TryPinchGrab(const FVector& PinchLocation)
 		CVarGunGripX.GetValueOnGameThread(), CVarGunGripY.GetValueOnGameThread(), CVarGunGripZ.GetValueOnGameThread()));
 
 	HeldActor = Best;
+	UE_LOG(LogTemp, Warning, TEXT("[Pinchwork-Pinch] hand=%s result=grabbed actor=%s class=%s"),
+		bIsRight ? TEXT("right") : TEXT("left"), *Best->GetPathName(), *Best->GetClass()->GetPathName());
+	if (GLog) { GLog->Flush(); }
 	++GHeldGrabCount;  // @AGILELENS - a grab is active -> free-hand ring-pinch tunes gun orient (not depth)
 	HeldPinchLocation = PinchLocation;
 	HeldPinchVelocity = FVector::ZeroVector;
@@ -556,6 +562,9 @@ void UHandTrackingComponent::ReleasePinchGrab()
 	}
 	AActor* Released = HeldActor;
 	HeldActor = nullptr;
+	UE_LOG(LogTemp, Warning, TEXT("[Pinchwork-Pinch] hand=%s result=released actor=%s class=%s"),
+		bIsRight ? TEXT("right") : TEXT("left"), *Released->GetPathName(), *Released->GetClass()->GetPathName());
+	if (GLog) { GLog->Flush(); }
 	if (GHeldGrabCount > 0) { --GHeldGrabCount; }  // @AGILELENS - keep the depth-cycle gate in sync
 	// Show this hand's mesh again.
 	SetHeldHandMeshHidden(false);

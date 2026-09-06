@@ -643,12 +643,14 @@ void UGamepadInputSetup::SetupGamepadMappings() {
   if (IMC_Def && !EI->HasMappingContext(IMC_Def))
     EI->AddMappingContext(IMC_Def, 0);
 
-  // Map L1/R1 to IA_Grab actions so shoulder buttons route through Enhanced Input
+  // Map L1/R1 to the pressed IA_Grab actions so shoulder buttons route through Enhanced Input.
+  // There are no unsuffixed IA_Grab_Left/Right assets in the project; loading those names
+  // emitted runtime errors and left the controller mappings incomplete.
   // (Our Tick reads the grab directly, but routing ensures key states are valid)
   auto *IA_GR = Cast<UInputAction>(StaticLoadObject(UInputAction::StaticClass(), nullptr,
-      TEXT("/Game/VRTemplate/Input/Actions/IA_Grab_Right.IA_Grab_Right")));
+      TEXT("/Game/VRTemplate/Input/Actions/IA_Grab_Right_Pressed.IA_Grab_Right_Pressed")));
   auto *IA_GL = Cast<UInputAction>(StaticLoadObject(UInputAction::StaticClass(), nullptr,
-      TEXT("/Game/VRTemplate/Input/Actions/IA_Grab_Left.IA_Grab_Left")));
+      TEXT("/Game/VRTemplate/Input/Actions/IA_Grab_Left_Pressed.IA_Grab_Left_Pressed")));
 
   // Map R2/L2 triggers to IA_Shoot actions — the Pistol blueprint listens for
   // these Enhanced Input actions to fire. On visionOS the PSVR2 triggers come
@@ -665,6 +667,13 @@ void UGamepadInputSetup::SetupGamepadMappings() {
   if (IA_SR) { GamepadIMC->MapKey(IA_SR, EKeys::Gamepad_RightTrigger);  bMapped = true; }
   if (IA_SL) { GamepadIMC->MapKey(IA_SL, EKeys::Gamepad_LeftTrigger);   bMapped = true; }
   if (bMapped) EI->AddMappingContext(GamepadIMC, 10);
+
+  UE_LOG(LogTemp, Warning,
+      TEXT("[Lumenwork-Startup] map=%s pawn=%s ia_grab_left=%s ia_grab_right=%s pinch_route=native_index_thumb"),
+      *World->GetMapName(),
+      Pawn ? *Pawn->GetClass()->GetPathName() : TEXT("missing"),
+      *GetPathNameSafe(IA_GL), *GetPathNameSafe(IA_GR));
+  if (GLog) { GLog->Flush(); }
 
   ScreenMsg(TEXT("R1=grab  L1=grab (controller-tracked)"));
   ScreenMsg(TEXT("R2=fire right  L2=fire left"));
