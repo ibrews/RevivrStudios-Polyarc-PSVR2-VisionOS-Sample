@@ -669,7 +669,7 @@ void UGamepadInputSetup::SetupGamepadMappings() {
   if (bMapped) EI->AddMappingContext(GamepadIMC, 10);
 
   UE_LOG(LogTemp, Warning,
-      TEXT("[Lumenwork-Startup] map=%s pawn=%s ia_grab_left=%s ia_grab_right=%s pinch_route=native_index_thumb"),
+      TEXT("[Lumenwork-Startup] build_tag=auth7803a36-v0.0.13 map=%s pawn=%s ia_grab_left=%s ia_grab_right=%s pinch_route=native_index_thumb"),
       *World->GetMapName(),
       Pawn ? *Pawn->GetClass()->GetPathName() : TEXT("missing"),
       *GetPathNameSafe(IA_GL), *GetPathNameSafe(IA_GR));
