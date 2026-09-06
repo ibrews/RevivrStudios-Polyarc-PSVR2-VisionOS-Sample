@@ -56,6 +56,7 @@ private:
 	// Find the player pawn's two hand components + spawn the demo cube. Retried
 	// each tick until the VR pawn exists (it spawns after world begin play).
 	bool TryWire();
+	bool bPawnRecoveryAttempted = false;
 
 	void UpdateTwoHand(float DeltaTime);
 	void UpdateMacro();

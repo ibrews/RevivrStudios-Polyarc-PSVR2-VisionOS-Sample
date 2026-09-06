@@ -7,7 +7,9 @@
 #include "Pinchwork/PinchworkGestures.h"
 
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/GameModeBase.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerStart.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
@@ -593,6 +595,47 @@ bool UPinchworkShowcaseSubsystem::TryWire()
 	if (!World) { return false; }
 	APlayerController* PC = World->GetFirstPlayerController();
 	APawn* Pawn = PC ? PC->GetPawn() : nullptr;
+	// The XR template GameMode uses the default collision-aware pawn-spawn path. On the shipped
+	// movable-test map its PlayerStart overlaps level collision at (-100, 0, 0), so visionOS logs
+	// "SpawnActor failed because of collision" and leaves a valid controller with no pawn forever.
+	// Recover once using the GameMode's own DefaultPawnClass and the same PlayerStart transform, but
+	// with AlwaysSpawn. This preserves the authored pawn selection while making the template robust
+	// to the stricter runtime collision result seen on the M5.
+	if (!Pawn && PC && !bPawnRecoveryAttempted)
+	{
+		bPawnRecoveryAttempted = true;
+		AGameModeBase* GameMode = World->GetAuthGameMode();
+		UClass* PawnClass = GameMode ? GameMode->DefaultPawnClass.Get() : nullptr;
+		AActor* PlayerStart = UGameplayStatics::GetActorOfClass(World, APlayerStart::StaticClass());
+		const FTransform SpawnTransform = PlayerStart
+			? PlayerStart->GetActorTransform()
+			: FTransform(FRotator::ZeroRotator, FVector(-100.f, 0.f, 0.f));
+
+		if (PawnClass && PawnClass->IsChildOf(APawn::StaticClass()))
+		{
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			Pawn = World->SpawnActor<APawn>(PawnClass, SpawnTransform, Params);
+			if (Pawn)
+			{
+				PC->Possess(Pawn);
+				UE_LOG(LogPinchworkShowcase, Warning,
+					TEXT("[SPAWNRECOVERY] possessed pawn=%s class=%s start=%s"),
+					*Pawn->GetName(), *Pawn->GetClass()->GetName(), *SpawnTransform.GetLocation().ToString());
+				if (GLog) { GLog->Flush(); }
+			}
+		}
+
+		if (!Pawn)
+		{
+			UE_LOG(LogPinchworkShowcase, Error,
+				TEXT("[SPAWNRECOVERY] failed (GameMode=%s PawnClass=%s PlayerStart=%s)"),
+				GameMode ? *GameMode->GetClass()->GetName() : TEXT("null"),
+				PawnClass ? *PawnClass->GetName() : TEXT("null"),
+				PlayerStart ? *PlayerStart->GetName() : TEXT("null"));
+			if (GLog) { GLog->Flush(); }
+		}
+	}
 	if (!Pawn)
 	{
 		if (bShouldLogDiag)
