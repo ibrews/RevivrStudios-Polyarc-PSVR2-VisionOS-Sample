@@ -47,3 +47,5 @@ Early. The AVP path is the furthest along; Android XR and Pico follow.
 ---
 
 Made by [Agile Lens](https://agilelens.com).
+
+Delivery safety: the M5 packaging route requires a source-matched native target receipt, passes `-NoEngineChanges`, and verifies the final IoStore/Pak payload against the fresh stage before signing. See [Build/Delivery](Build/Delivery/README.md).

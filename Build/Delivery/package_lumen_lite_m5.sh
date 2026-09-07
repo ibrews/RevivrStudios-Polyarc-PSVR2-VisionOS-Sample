@@ -10,7 +10,7 @@ PROJECT="$PROJECT_ROOT/Lumenwork.uproject"
 EXPECTED_ENGINE="eb47362c29cc1cde71afeb6bd885c86ff7e8127a"
 RECOVERY_RECEIPT="${RECOVERY_RECEIPT:-$HOME/knowledge/fleet/receipts/engine-recovery-eb473.done}"
 LEASE="${LEASE:-$HOME/.claude/hooks/ue-build-lane.sh}"
-OWNER_SESSION="${OWNER_SESSION:-01a07a55-22e0-7a81-a1c8-803646e22ed4}"
+OWNER_SESSION="${OWNER_SESSION:?set OWNER_SESSION to the current delivery task ID}"
 OWNER_TASK="${OWNER_TASK:-Lumenwork overnight M5 delivery}"
 RESERVE_GIB="${RESERVE_GIB:-8}"
 ENTITLEMENTS="${ENTITLEMENTS:-/private/tmp/lumenwork-myproject.entitlements}"
@@ -33,6 +33,7 @@ if [ "${1:-}" != "--inner" ]; then
   require_recovery_receipt
   test -f "$LEASE"
   python3 "$PROJECT_ROOT/Build/Delivery/guarded_ubt.py" --identity-only
+  test -s "$PROJECT_ROOT/Binaries/VisionOS/Lumenwork.target" || { echo "MISSING_NATIVE_RECEIPT=$PROJECT_ROOT/Binaries/VisionOS/Lumenwork.target" >&2; exit 77; }
   RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
   export ENGINE PROJECT_ROOT RECOVERY_RECEIPT LEASE OWNER_SESSION OWNER_TASK
   export RESERVE_GIB ENTITLEMENTS CERTIFICATE RUN_ID
@@ -58,12 +59,15 @@ LOG_ROOT="/Users/Shared/GH/_deliveries/logs/lumenwork-m5-$RUN_ID"
 test ! -e "$RUN_ROOT"
 test ! -e "$LOG_ROOT"
 mkdir -p "$RUN_ROOT" "$LOG_ROOT"
+mkdir -p "$RUN_ROOT/tmp" "$RUN_ROOT/ddc" "$LOG_ROOT/uat"
+export TMPDIR="$RUN_ROOT/tmp/" TEMP="$RUN_ROOT/tmp" TMP="$RUN_ROOT/tmp"
+export uebp_LogFolder="$LOG_ROOT/uat"
 LOG="$LOG_ROOT/package.log"
 exec > >(tee -a "$LOG") 2>&1
 
 # Arm a host-local, descriptor-driven watchdog. It observes this shell and the
 # terminal marker without consuming an agent turn.
-WATCHDOG="$HOME/knowledge/departments/engineering/fleet-tools/overnight-watchdog.ps1"
+WATCHDOG="${WATCHDOG:-$HOME/knowledge/departments/engineering/fleet-tools/overnight-watchdog.ps1}"
 if command -v pwsh >/dev/null 2>&1 && [ -f "$WATCHDOG" ]; then
   python3 - "$LOG_ROOT/watchdog.json" "$LOG" "$$" "$RUN_ID" <<'PY'
 import json, sys
@@ -106,13 +110,14 @@ if [ -f "$stats" ]; then
 fi
 
 export NuGetAudit=false
+env "UE-LocalDataCachePath=$RUN_ROOT/ddc" "UE-SharedDataCachePath=None" \
 "$ENGINE/Engine/Build/BatchFiles/RunUAT.sh" BuildCookRun \
   -project="$PROJECT" -target=Lumenwork -platform=VisionOS \
   -clientconfig=Development -skipbuild -cook -stage -pak \
   -stagingdirectory="$RUN_ROOT/stage" \
   -unrealexe="$ENGINE/Engine/Binaries/Mac/UnrealEditor-Cmd" \
   -nocompileeditor -skipbuildeditor -nop4 -unattended -nopause -utf8output \
-  -WaitForUATMutex -NoUBA -ubtargs=-NoUBA \
+  -WaitForUATMutex -nocompile -nocompileuat -NoUBA -NoEngineChanges -ubtargs="-NoUBA -NoEngineChanges" \
   -additionalcookeroptions=-DisablePlugins=ECABridge
 
 test -f "$stats"
@@ -131,7 +136,8 @@ echo "IOSTORE_UTOC_SHA256=$(shasum -a 256 "$utoc" | awk '{print $1}')"
 workspace="$PROJECT_ROOT/Intermediate/ProjectFiles/Lumenwork_VisionOS_Lumenwork.xcworkspace"
 UBT_NO_POST_DEPLOY=true /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild build \
   -workspace "$workspace" -scheme Lumenwork -configuration Development \
-  -destination generic/platform=visionOS \
+  -destination generic/platform=visionOS -derivedDataPath "$RUN_ROOT/xcode-derived" \
+  UE_OVERRIDE_STAGE_DIR="$RUN_ROOT/stage/VisionOS" \
   CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION=YES \
   ENABLE_USER_SCRIPT_SANDBOXING=NO CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO UE_XCODE_BUILD_MODE=PostBuildSync
@@ -142,6 +148,8 @@ artifact="$RUN_ROOT/Lumenwork-0.0.13-M5-eb473.zip"
 test -f "$app/Lumenwork"
 test -d "$app/cookeddata"
 /usr/bin/ditto "$app" "$candidate"
+python3 "$PROJECT_ROOT/Build/Delivery/verify_staged_payload.py" \
+  "$RUN_ROOT/stage/VisionOS" "$candidate" --output "$LOG_ROOT/staged-payload.json"
 
 plist="$candidate/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 0.0.13' "$plist" 2>/dev/null || \
