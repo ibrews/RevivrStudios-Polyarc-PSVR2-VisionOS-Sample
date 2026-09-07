@@ -18,9 +18,9 @@ def approved_facts():
     return {
         "project_root": str(guard.EXPECTED_PROJECT_ROOT),
         "origin": guard.EXPECTED_ORIGIN,
-        "head": guard.EXPECTED_HEAD,
-        "required_ref_head": guard.EXPECTED_HEAD,
-        "required_ancestor_present": True,
+        "head": guard.DELIVERY_BASE,
+        "required_ref_head": guard.DELIVERY_BASE,
+        "delivery_base_present": True,
         "tracked_dirty": False,
         "engine_root": str(guard.EXPECTED_ENGINE_ROOT),
         "engine_head": guard.EXPECTED_ENGINE_HEAD,
@@ -44,14 +44,14 @@ class IdentityTests(unittest.TestCase):
         facts.update(
             origin="https://github.com/example/fork.git",
             required_ref_head="bad",
-            required_ancestor_present=False,
+            delivery_base_present=False,
             tracked_dirty=True,
         )
         with self.assertRaises(guard.GuardError) as context:
             guard.validate_identity(facts)
         message = str(context.exception)
         self.assertIn("origin must be", message)
-        self.assertIn("required ancestor", message)
+        self.assertIn("required delivery base", message)
         self.assertIn("tracked dirt", message)
 
 
@@ -80,7 +80,7 @@ class PreviewTests(unittest.TestCase):
             "schema_version": 1,
             "authorization": "engine-recovery",
             "token_sha256": hashlib.sha256(token.encode()).hexdigest(),
-            "project_head": guard.EXPECTED_HEAD,
+            "project_head": guard.DELIVERY_BASE,
             "engine_head": guard.EXPECTED_ENGINE_HEAD,
             "allow_engine_outputs": True,
             "max_actions": 3438,

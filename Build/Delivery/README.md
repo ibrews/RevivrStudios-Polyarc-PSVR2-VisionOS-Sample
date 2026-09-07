@@ -19,7 +19,7 @@ Large or engine-mutating recovery graphs require a
   "schema_version": 1,
   "authorization": "engine-recovery",
   "token_sha256": "SHA256_OF_ONE_USE_TOKEN",
-  "project_head": "1f40918ea2664f85a6e4aba5c8adb95b937194b4",
+  "project_head": "CURRENT_REQUIRED_DELIVERY_REF_HEAD",
   "engine_head": "eb47362c29cc1cde71afeb6bd885c86ff7e8127a",
   "allow_engine_outputs": true,
   "max_actions": 3438

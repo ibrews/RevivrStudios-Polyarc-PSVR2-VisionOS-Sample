@@ -18,9 +18,8 @@ EXPECTED_PROJECT_ROOT = Path("/Users/Shared/GH/_deliveries/Lumenwork")
 REJECTED_PROJECT_ROOT = Path("/Users/Shared/GH/Lumenwork")
 EXPECTED_ORIGIN = "https://github.com/AgileLens/Lumenwork.git"
 REQUIRED_REF = "refs/remotes/origin/codex/lumenwork-authoritative-delivery-20260906"
-EXPECTED_HEAD = "1f40918ea2664f85a6e4aba5c8adb95b937194b4"
+DELIVERY_BASE = "1f40918ea2664f85a6e4aba5c8adb95b937194b4"
 REJECTED_HEAD = "7803a36ea4b94a8c65919c1caa1b072a631d6ed3"
-REQUIRED_ANCESTOR = REJECTED_HEAD
 EXPECTED_ENGINE_ROOT = Path(
     "/Users/Shared/GH/UnrealEngineVisionOS/.claude/worktrees/ue582-xr-main-m5"
 )
@@ -50,8 +49,8 @@ def collect_identity(project_root: Path, engine_root: Path) -> dict[str, Any]:
     engine_root = engine_root.resolve()
     head = _git(project_root, "rev-parse", "HEAD")
     ref_head = _git(project_root, "rev-parse", REQUIRED_REF)
-    ancestor = subprocess.run(
-        ["git", "-C", str(project_root), "merge-base", "--is-ancestor", REQUIRED_ANCESTOR, head],
+    delivery_base_present = subprocess.run(
+        ["git", "-C", str(project_root), "merge-base", "--is-ancestor", DELIVERY_BASE, head],
         check=False,
     ).returncode == 0
     return {
@@ -59,7 +58,7 @@ def collect_identity(project_root: Path, engine_root: Path) -> dict[str, Any]:
         "origin": _git(project_root, "remote", "get-url", "origin"),
         "head": head,
         "required_ref_head": ref_head,
-        "required_ancestor_present": ancestor,
+        "delivery_base_present": delivery_base_present,
         "tracked_dirty": bool(_git(project_root, "status", "--porcelain", "--untracked-files=no")),
         "engine_root": str(engine_root),
         "engine_head": _git(engine_root, "rev-parse", "HEAD"),
@@ -78,12 +77,10 @@ def validate_identity(facts: dict[str, Any]) -> None:
         errors.append(f"project root must be {EXPECTED_PROJECT_ROOT}, got {project_root}")
     if facts.get("origin") != EXPECTED_ORIGIN:
         errors.append(f"origin must be {EXPECTED_ORIGIN}, got {facts.get('origin')}")
-    if head != EXPECTED_HEAD:
-        errors.append(f"HEAD must be {EXPECTED_HEAD}, got {head}")
-    if facts.get("required_ref_head") != EXPECTED_HEAD:
-        errors.append(f"{REQUIRED_REF} must resolve to {EXPECTED_HEAD}")
-    if facts.get("required_ancestor_present") is not True:
-        errors.append(f"required ancestor {REQUIRED_ANCESTOR} is absent")
+    if head != facts.get("required_ref_head"):
+        errors.append(f"HEAD must exactly match {REQUIRED_REF}")
+    if facts.get("delivery_base_present") is not True:
+        errors.append(f"required delivery base {DELIVERY_BASE} is absent")
     if facts.get("tracked_dirty") is not False:
         errors.append("project has tracked dirt")
     if Path(str(facts.get("engine_root", ""))) != EXPECTED_ENGINE_ROOT:
