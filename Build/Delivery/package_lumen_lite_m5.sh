@@ -16,6 +16,8 @@ RESERVE_GIB="${RESERVE_GIB:-8}"
 ENTITLEMENTS="${ENTITLEMENTS:-/private/tmp/lumenwork-myproject.entitlements}"
 CERTIFICATE="${CERTIFICATE:-AAAD77542C2299171B729CDCC518F46FF9646F73}"
 EXPECTED_BUNDLE_ID="com.agilelens.lumenwork.MyProject"
+PROVISIONING_PROFILE="${PROVISIONING_PROFILE:-$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/7f797f53-7617-44bd-8b14-d83522c87aaf.mobileprovision}"
+DEVICE_ID="${DEVICE_ID:-00008142-000468E83409401C}"
 
 require_recovery_receipt() {
   test -f "$RECOVERY_RECEIPT" || { echo "RECOVERY_NOT_RELEASED=$RECOVERY_RECEIPT" >&2; exit 75; }
@@ -34,9 +36,10 @@ if [ "${1:-}" != "--inner" ]; then
   test -f "$LEASE"
   python3 "$PROJECT_ROOT/Build/Delivery/guarded_ubt.py" --identity-only
   test -s "$PROJECT_ROOT/Binaries/VisionOS/Lumenwork.target" || { echo "MISSING_NATIVE_RECEIPT=$PROJECT_ROOT/Binaries/VisionOS/Lumenwork.target" >&2; exit 77; }
+  test -s "$PROVISIONING_PROFILE"
   RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
   export ENGINE PROJECT_ROOT RECOVERY_RECEIPT LEASE OWNER_SESSION OWNER_TASK
-  export RESERVE_GIB ENTITLEMENTS CERTIFICATE RUN_ID
+  export RESERVE_GIB ENTITLEMENTS CERTIFICATE RUN_ID PROVISIONING_PROFILE DEVICE_ID
   exec bash "$LEASE" run \
     --owner-session "$OWNER_SESSION" \
     --owner-task "$OWNER_TASK" \
@@ -96,6 +99,13 @@ echo "RUN_ID=$RUN_ID"
 echo "ENGINE_HEAD=$EXPECTED_ENGINE"
 echo "SOURCE_HEAD=$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
 
+cp "$PROVISIONING_PROFILE" "$RUN_ROOT/embedded.mobileprovision"
+cp "$ENTITLEMENTS" "$RUN_ROOT/signing.entitlements"
+ENTITLEMENTS="$RUN_ROOT/signing.entitlements"
+python3 "$PROJECT_ROOT/Build/Delivery/verify_signing_profile.py" "$RUN_ROOT/embedded.mobileprovision" \
+  --bundle "$EXPECTED_BUNDLE_ID" --certificate "$CERTIFICATE" --device "$DEVICE_ID" \
+  --output "$LOG_ROOT/signing-profile.json"
+
 engine_manifest="$ENGINE/Engine/Binaries/Mac/UnrealEditor.modules"
 project_manifest="$PROJECT_ROOT/Binaries/Mac/UnrealEditor.modules"
 engine_build_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["BuildId"])' "$engine_manifest")"
@@ -138,6 +148,7 @@ UBT_NO_POST_DEPLOY=true /Applications/Xcode.app/Contents/Developer/usr/bin/xcode
   -workspace "$workspace" -scheme Lumenwork -configuration Development \
   -destination generic/platform=visionOS -derivedDataPath "$RUN_ROOT/xcode-derived" \
   UE_OVERRIDE_STAGE_DIR="$RUN_ROOT/stage/VisionOS" \
+  PRODUCT_BUNDLE_IDENTIFIER="$EXPECTED_BUNDLE_ID" DEVELOPMENT_TEAM=C624J4S2F8 \
   CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION=YES \
   ENABLE_USER_SCRIPT_SANDBOXING=NO CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO UE_XCODE_BUILD_MODE=PostBuildSync
@@ -159,6 +170,7 @@ plist="$candidate/Info.plist"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = "$EXPECTED_BUNDLE_ID"
 printf '%s\n' '-metalmobilesm5 -csvGpuStats -csvCaptureFrames=1800' > "$candidate/uecommandline.txt"
 
+cp "$RUN_ROOT/embedded.mobileprovision" "$candidate/embedded.mobileprovision"
 codesign --force --sign "$CERTIFICATE" --entitlements "$ENTITLEMENTS" \
   --generate-entitlement-der --timestamp=none "$candidate"
 codesign --verify --deep --strict --verbose=2 "$candidate"

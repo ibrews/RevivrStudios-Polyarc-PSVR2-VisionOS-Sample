@@ -17,7 +17,10 @@ The package route uses `-skipbuild`, disables AutomationTool compilation, passes
 `-NoEngineChanges`, and routes temporary files, local DDC, UAT logs and Xcode
 DerivedData into the unique run directory. Set `ENTITLEMENTS` to preserved
 Agile Lens signing entitlements and run signing in a context that can access the
-development identity.
+development identity. The preserved provisioning profile is checked for the
+Agile Lens team, intended bundle, M5 UDID, certificate fingerprint and expiration.
+Xcode receives the intended bundle ID explicitly; the verified profile is embedded
+before signing. CMS decoding does not alter the keychain search list.
 
 Xcode receives `UE_OVERRIDE_STAGE_DIR=<run>/stage/VisionOS`. The final candidate's
 complete .utoc/.ucas/.pak inventory must match this stage by path, size and SHA-256
