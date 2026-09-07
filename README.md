@@ -23,7 +23,10 @@ detects pinches and performs the real grab/release/physics throw. See the
 acceptance controls, original Manny XR meshes, and a spectator recording recipe.
 
 1. **Build and deploy to Apple Vision Pro.**
-   `./ue-avp-build.sh device` then install with `xcrun devicectl device install app`.
+   First build the exact VisionOS target through the guarded lane. Then run
+   `SKIP_BUILD=1 ./ue-avp-build.sh device` for a fresh cook/package. Device mode
+   packages without installing by default; after checking current wearer/capture
+   activity, opt in with `INSTALL_DEVICE=1 DEVICE_ACTIVITY_CHECKED=1`.
    Expect the documented `Touch UBT generated tiles` finalize bug — the fix is to re-run the
    `xcodebuild` line from the log's `params:` output by hand.
 2. **Confirm you actually got SM5, not ES3.1.** Read the shader platform out of the *runtime*

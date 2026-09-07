@@ -6,6 +6,11 @@
 > deleted 2,356 build products. Do not bypass this guard. A replacement preview
 > mechanism must prove non-mutation before build admission can be restored.
 
+`--identity-only` validates the exact project root, remote, authoritative ref,
+ancestry, clean tracked state, engine path, engine commit, and clean engine state
+without invoking UBT. Use it before a `-skipbuild` cook/package. It accepts the
+canonical HTTPS and SSH forms of the `AgileLens/Lumenwork` remote.
+
 `guarded_ubt.py` is the required fail-closed entry point for ordinary M5 project
 builds from the authoritative delivery checkout. It validates the exact checkout,
 remote, ref, ancestry, source and engine commits, and tracked cleanliness before

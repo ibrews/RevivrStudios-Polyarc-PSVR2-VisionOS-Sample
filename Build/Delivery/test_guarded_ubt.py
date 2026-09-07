@@ -32,6 +32,11 @@ class IdentityTests(unittest.TestCase):
     def test_approved_delivery_checkout_passes(self):
         guard.validate_identity(approved_facts())
 
+    def test_approved_ssh_origin_passes(self):
+        facts = approved_facts()
+        facts["origin"] = "git@github.com:AgileLens/Lumenwork.git"
+        guard.validate_identity(facts)
+
     def test_rejected_legacy_checkout_fails(self):
         facts = approved_facts()
         facts["project_root"] = str(guard.REJECTED_PROJECT_ROOT)
@@ -50,7 +55,7 @@ class IdentityTests(unittest.TestCase):
         with self.assertRaises(guard.GuardError) as context:
             guard.validate_identity(facts)
         message = str(context.exception)
-        self.assertIn("origin must be", message)
+        self.assertIn("origin must resolve to AgileLens/Lumenwork", message)
         self.assertIn("required delivery base", message)
         self.assertIn("tracked dirt", message)
 
@@ -163,6 +168,31 @@ class PreviewTests(unittest.TestCase):
         finally:
             guard.collect_identity = original_collect
         self.assertFalse(called)
+
+    def test_identity_only_never_invokes_ubt(self):
+        calls = []
+        original_collect = guard.collect_identity
+        original_root = guard.EXPECTED_PROJECT_ROOT
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                project_root = Path(directory)
+                (project_root / "Lumenwork.uproject").write_text("{}", encoding="utf-8")
+                guard.EXPECTED_PROJECT_ROOT = project_root
+                facts = approved_facts()
+                facts["project_root"] = str(project_root)
+                guard.collect_identity = lambda *_: facts
+                result = guard.guarded_build(
+                    project_root,
+                    guard.EXPECTED_ENGINE_ROOT,
+                    project_root / "unused.json",
+                    identity_only=True,
+                    runner=lambda command, **kwargs: calls.append(command),
+                )
+        finally:
+            guard.collect_identity = original_collect
+            guard.EXPECTED_PROJECT_ROOT = original_root
+        self.assertEqual(0, result)
+        self.assertEqual([], calls)
 
 
 if __name__ == "__main__":

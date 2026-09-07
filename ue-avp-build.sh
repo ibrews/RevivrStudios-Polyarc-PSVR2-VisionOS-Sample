@@ -42,6 +42,8 @@ SIM_UDID="${SIM_UDID:-}"                  # blank = auto-pick a visionOS sim
 DEVICE_ID="${DEVICE_ID:-}"                # blank = auto-pick a connected AVP (or set explicitly)
 DEVICE_TEAM="${DEVICE_TEAM:-C624J4S2F8}"  # Agile Lens LLC — sign com.agilelens.* / AVP builds with this team
 EXPECTED_DEVICE_BUNDLE_ID="${EXPECTED_DEVICE_BUNDLE_ID:-com.agilelens.lumenwork.MyProject}"
+INSTALL_DEVICE="${INSTALL_DEVICE:-0}"
+DEVICE_ACTIVITY_CHECKED="${DEVICE_ACTIVITY_CHECKED:-0}"
 # --------------------------------------------------------------------------------
 
 UAT="$UE_ROOT/Engine/Build/BatchFiles/RunUAT.sh"
@@ -213,6 +215,14 @@ case "$MODE" in
     echo "→ launched $BUNDLE_ID in sim $DEV (Mixed/passthrough — same render config as device)" ;;
   device)
     start_monitoring
+    DELIVERY_GUARD="$HERE/Build/Delivery/guarded_ubt.py"
+    [ -f "$DELIVERY_GUARD" ] || { echo "[ue-avp-build] ERROR: missing delivery guard at $DELIVERY_GUARD" >&2; exit 1; }
+    python3 "$DELIVERY_GUARD" --identity-only
+    if [ "${SKIP_BUILD:-0}" != "1" ]; then
+        echo "[ue-avp-build] REFUSING FULL BUILD: safe UBT action preview is quarantined." >&2
+        echo "[ue-avp-build] Build the exact VisionOS target through the guarded lane, then rerun with SKIP_BUILD=1 to cook/package." >&2
+        exit 1
+    fi
     # Device = arm64 (no -clientarchitecture). Agile Lens signing. Immersive apps can't be remote-launched → tap.
     bcr "-ini:Engine:[/Script/MacTargetPlatform.XcodeProjectSettings]:CodeSigningTeam=$DEVICE_TEAM"
     APP="$(newest_app)"
@@ -251,9 +261,17 @@ case "$MODE" in
         DEV_ID="$DEVICE_ID"
     fi
     echo "built (Agile Lens $DEVICE_TEAM): $APP"
-    if [ -n "$DEV_ID" ]; then xcrun devicectl device install app --device "$DEV_ID" "$APP"
-    else echo "set DEVICE_ID, then: xcrun devicectl device install app --device <id> '$APP'"; fi
-    echo "→ wear the AVP and TAP the app icon (no remote launch for immersive apps)" ;;
+    if [ "$INSTALL_DEVICE" = "1" ]; then
+        if [ "$DEVICE_ACTIVITY_CHECKED" != "1" ]; then
+            echo "[ue-avp-build] REFUSING INSTALL: set DEVICE_ACTIVITY_CHECKED=1 only after checking current wearer/capture activity." >&2
+            exit 1
+        fi
+        [ -n "$DEV_ID" ] || { echo "[ue-avp-build] ERROR: install requested but no device is available." >&2; exit 1; }
+        xcrun devicectl device install app --device "$DEV_ID" "$APP"
+        echo "→ installed; wear the AVP and TAP the app icon (no remote launch for immersive apps)"
+    else
+        echo "→ packaged only; install requires INSTALL_DEVICE=1 DEVICE_ACTIVITY_CHECKED=1"
+    fi ;;
   help|*)
     echo "usage: $0 sim|device   — identical render config for both; only arch/signing/install differ" ;;
 esac

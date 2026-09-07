@@ -17,6 +17,11 @@ from typing import Any, Callable, Iterable
 EXPECTED_PROJECT_ROOT = Path("/Users/Shared/GH/_deliveries/Lumenwork")
 REJECTED_PROJECT_ROOT = Path("/Users/Shared/GH/Lumenwork")
 EXPECTED_ORIGIN = "https://github.com/AgileLens/Lumenwork.git"
+EXPECTED_ORIGINS = {
+    EXPECTED_ORIGIN,
+    "git@github.com:AgileLens/Lumenwork.git",
+    "ssh://git@github.com/AgileLens/Lumenwork.git",
+}
 REQUIRED_REF = "refs/remotes/origin/codex/lumenwork-authoritative-delivery-20260906"
 DELIVERY_BASE = "1f40918ea2664f85a6e4aba5c8adb95b937194b4"
 REJECTED_HEAD = "7803a36ea4b94a8c65919c1caa1b072a631d6ed3"
@@ -79,8 +84,8 @@ def validate_identity(facts: dict[str, Any]) -> None:
         errors.append("explicitly rejected legacy checkout /Users/Shared/GH/Lumenwork at 7803a36")
     if project_root != EXPECTED_PROJECT_ROOT:
         errors.append(f"project root must be {EXPECTED_PROJECT_ROOT}, got {project_root}")
-    if facts.get("origin") != EXPECTED_ORIGIN:
-        errors.append(f"origin must be {EXPECTED_ORIGIN}, got {facts.get('origin')}")
+    if facts.get("origin") not in EXPECTED_ORIGINS:
+        errors.append(f"origin must resolve to AgileLens/Lumenwork, got {facts.get('origin')}")
     if head != facts.get("required_ref_head"):
         errors.append(f"HEAD must exactly match {REQUIRED_REF}")
     if facts.get("delivery_base_present") is not True:
@@ -253,6 +258,7 @@ def guarded_build(
     receipt_file: Path | None = None,
     recovery_token: str | None = None,
     preview_only: bool = False,
+    identity_only: bool = False,
     execute_target_set: str = "combined",
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> int:
@@ -261,6 +267,10 @@ def guarded_build(
     project_file = project_root / "Lumenwork.uproject"
     if not project_file.is_file():
         raise GuardError(f"missing project file: {project_file}")
+
+    if identity_only:
+        print(f"IDENTITY_OK head={facts['head']} engine={facts['engine_head']}")
+        return 0
 
     # This must remain before graph directory creation and before any runner call.
     # UE BuildMode calls DeleteOutdatedProducedItems before its
@@ -310,6 +320,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--preview-only", action="store_true")
     parser.add_argument(
+        "--identity-only",
+        action="store_true",
+        help="validate project and engine identity without invoking UBT",
+    )
+    parser.add_argument(
         "--execute-target-set",
         choices=("combined", "editor"),
         default="combined",
@@ -332,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
             receipt_file=args.manager_recovery_receipt,
             recovery_token=args.manager_recovery_token,
             preview_only=args.preview_only,
+            identity_only=args.identity_only,
             execute_target_set=args.execute_target_set,
         )
     except (GuardError, FileNotFoundError, json.JSONDecodeError) as error:
