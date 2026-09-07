@@ -19,9 +19,14 @@ EXPECTED_BUNDLE_ID="com.agilelens.lumenwork.MyProject"
 
 require_recovery_receipt() {
   test -f "$RECOVERY_RECEIPT" || { echo "RECOVERY_NOT_RELEASED=$RECOVERY_RECEIPT" >&2; exit 75; }
-  grep -q "$EXPECTED_ENGINE" "$RECOVERY_RECEIPT" || {
-    echo "RECOVERY_RECEIPT_WRONG_ENGINE=$RECOVERY_RECEIPT" >&2; exit 76;
+  receipt_engine="$(awk '$1 == "engine_commit:" { print $2 }' "$RECOVERY_RECEIPT")"
+  printf '%s\n' "$receipt_engine" | grep -Eq '^[0-9a-f]{12,40}$' || {
+    echo "RECOVERY_RECEIPT_INVALID_ENGINE=$receipt_engine" >&2; exit 76;
   }
+  case "$EXPECTED_ENGINE" in
+    "$receipt_engine"*) ;;
+    *) echo "RECOVERY_RECEIPT_WRONG_ENGINE=$receipt_engine" >&2; exit 76 ;;
+  esac
 }
 
 if [ "${1:-}" != "--inner" ]; then
