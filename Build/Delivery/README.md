@@ -45,3 +45,26 @@ Prefer setting `LUMENWORK_MANAGER_RECOVERY_TOKEN` instead of putting the token o
 the command line. Identity checks are never bypassed by a recovery receipt.
 
 Run tests with `python3 -m unittest Build/Delivery/test_guarded_ubt.py`.
+
+## M5 Lumen Lite delivery
+
+`package_lumen_lite_m5.sh` is the post-recovery 0.0.13 cook/package/sign path.
+It refuses to start until the exact `engine-recovery-eb473.done` receipt names
+the accepted engine hash, reruns the identity guard, executes the protected
+pipeline inside `ue-build-lane.sh run`, and arms the descriptor-driven overnight
+watchdog. It preserves a unique run directory and requires fresh
+`ShaderTypeStats-METAL_SM5_IOS.csv` evidence with global-shader counts of at
+least 1/2/4 for the three Lumen Lite shader types. It does not install.
+
+`prepare_lumen_lite_m5_arm.sh` derives signed A/B/C/D/E candidates from that
+preserved baseline. Device installation remains off by default and requires an
+explicit current wearer/capture activity check. Every arm pins
+`xr.SecondaryScreenPercentage.HMDRenderTarget=100`; arm B is the primary demo
+candidate with `r.Lumen.FinalGatherMethod=0`. Nanite is outside this delivery.
+
+Run all delivery unit tests with:
+
+```bash
+python3 -m unittest Build/Delivery/test_guarded_ubt.py \
+  Build/Delivery/test_verify_lumen_lite_cook.py
+```
