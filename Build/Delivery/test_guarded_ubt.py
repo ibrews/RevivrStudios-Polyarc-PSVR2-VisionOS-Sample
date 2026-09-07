@@ -109,7 +109,7 @@ class PreviewTests(unittest.TestCase):
         )
         self.assertIn("-NoEngineChanges", editor_command)
 
-    def test_large_preview_fails_before_execution(self):
+    def test_ubt_preview_is_quarantined_before_runner(self):
         calls = []
         original_collect = guard.collect_identity
         original_root = guard.EXPECTED_PROJECT_ROOT
@@ -124,17 +124,9 @@ class PreviewTests(unittest.TestCase):
 
                 def runner(command, **kwargs):
                     calls.append(command)
-                    graph_argument = next(
-                        part for part in command if part.startswith("-WriteOutdatedActions=")
-                    )
-                    graph_path = Path(graph_argument.split("=", 1)[1])
-                    graph_path.write_text(
-                        json.dumps({"Actions": [{} for _ in range(3438)]}),
-                        encoding="utf-8",
-                    )
                     return subprocess.CompletedProcess(command, 0)
 
-                with self.assertRaisesRegex(guard.GuardError, "3438 actions exceed"):
+                with self.assertRaisesRegex(guard.GuardError, "preview is destructive"):
                     guard.guarded_build(
                         project_root,
                         guard.EXPECTED_ENGINE_ROOT,
@@ -144,7 +136,7 @@ class PreviewTests(unittest.TestCase):
         finally:
             guard.collect_identity = original_collect
             guard.EXPECTED_PROJECT_ROOT = original_root
-        self.assertEqual(1, len(calls), "compile command must not run after rejected preview")
+        self.assertEqual(0, len(calls), "quarantined UBT preview must never launch")
 
     def test_identity_failure_happens_before_preview_runner(self):
         called = False

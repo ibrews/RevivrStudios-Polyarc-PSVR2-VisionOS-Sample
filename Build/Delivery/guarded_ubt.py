@@ -25,6 +25,10 @@ EXPECTED_ENGINE_ROOT = Path(
 )
 EXPECTED_ENGINE_HEAD = "eb47362c29cc1cde71afeb6bd885c86ff7e8127a"
 DEFAULT_ACTION_BUDGET = 200
+UNSAFE_PREVIEW_REASON = (
+    "UBT -WriteOutdatedActions is quarantined: BuildMode deletes outdated produced items "
+    "before exporting the graph (P0 incident 2026-09-07)"
+)
 
 
 class GuardError(RuntimeError):
@@ -258,6 +262,11 @@ def guarded_build(
     if not project_file.is_file():
         raise GuardError(f"missing project file: {project_file}")
 
+    # This must remain before graph directory creation and before any runner call.
+    # UE BuildMode calls DeleteOutdatedProducedItems before its
+    # WriteOutdatedActions branch, so the nominal preview is destructive.
+    raise GuardError(UNSAFE_PREVIEW_REASON)
+
     graph_file.parent.mkdir(parents=True, exist_ok=True)
     graph_file.unlink(missing_ok=True)
     preview = runner(preview_command(engine_root, project_file, graph_file), check=False, text=True)
@@ -266,7 +275,7 @@ def guarded_build(
     if not graph_file.is_file():
         raise GuardError("UBT preview returned success without writing the action graph")
 
-    actions = load_actions(graph_file)
+    actions = load_actions(graph_file)  # pragma: no cover - quarantined above
     allowed = recovery_authorized(receipt_file, recovery_token, len(actions), facts)
     validate_preview(actions, engine_root, budget, allowed)
     print(f"IDENTITY_OK head={facts['head']} engine={facts['engine_head']}")

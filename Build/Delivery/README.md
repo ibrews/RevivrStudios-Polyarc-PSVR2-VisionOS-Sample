@@ -1,5 +1,11 @@
 # Authoritative Lumenwork build guard
 
+> **P0 quarantine (2026-09-07):** this launcher currently refuses every UBT
+> invocation. Unreal's `-WriteOutdatedActions` path calls
+> `DeleteOutdatedProducedItems` before exporting the graph; an attempted preview
+> deleted 2,356 build products. Do not bypass this guard. A replacement preview
+> mechanism must prove non-mutation before build admission can be restored.
+
 `guarded_ubt.py` is the required fail-closed entry point for ordinary M5 project
 builds from the authoritative delivery checkout. It validates the exact checkout,
 remote, ref, ancestry, source and engine commits, and tracked cleanliness before
