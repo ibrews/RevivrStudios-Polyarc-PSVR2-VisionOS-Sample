@@ -126,7 +126,7 @@ class PreviewTests(unittest.TestCase):
                     calls.append(command)
                     return subprocess.CompletedProcess(command, 0)
 
-                with self.assertRaisesRegex(guard.GuardError, "preview is destructive"):
+                with self.assertRaisesRegex(guard.GuardError, "deletes outdated produced items"):
                     guard.guarded_build(
                         project_root,
                         guard.EXPECTED_ENGINE_ROOT,
