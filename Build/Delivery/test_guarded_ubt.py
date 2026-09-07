@@ -101,6 +101,13 @@ class PreviewTests(unittest.TestCase):
         self.assertNotIn("-NoEngineChanges", command)
         self.assertNotIn("-WriteOutdatedActions=/tmp/actions.json", guard.execution_command(guard.EXPECTED_ENGINE_ROOT, project))
         self.assertIn("-NoEngineChanges", guard.execution_command(guard.EXPECTED_ENGINE_ROOT, project))
+        editor_command = guard.execution_command(guard.EXPECTED_ENGINE_ROOT, project, "editor")
+        editor_targets = [part for part in editor_command if part.startswith("-Target=")]
+        self.assertEqual(
+            [f"-Target=LumenworkEditor Mac Development -Project={project}"],
+            editor_targets,
+        )
+        self.assertIn("-NoEngineChanges", editor_command)
 
     def test_large_preview_fails_before_execution(self):
         calls = []

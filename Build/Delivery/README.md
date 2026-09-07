@@ -9,6 +9,10 @@ Ordinary builds are rejected when the graph exceeds 200 actions or would write
 under the engine's `Engine/Binaries`, `Engine/Intermediate`, or `Engine/Saved`
 trees. Builds that pass are launched with `-NoEngineChanges`.
 
+Use `--execute-target-set editor` when the admitted operation is only the project
+editor module. The safety preview still evaluates all four combined targets; only
+the post-admission execution is narrowed.
+
 Large or engine-mutating recovery graphs require a
 `--manager-recovery-receipt PATH` and a one-use token supplied through
 `LUMENWORK_MANAGER_RECOVERY_TOKEN` (preferred) or

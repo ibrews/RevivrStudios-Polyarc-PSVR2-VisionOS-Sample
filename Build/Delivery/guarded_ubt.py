@@ -116,9 +116,19 @@ def preview_command(engine_root: Path, project_file: Path, graph_file: Path) -> 
     ]
 
 
-def execution_command(engine_root: Path, project_file: Path) -> list[str]:
+def execution_command(
+    engine_root: Path, project_file: Path, target_set: str = "combined"
+) -> list[str]:
     command = preview_command(engine_root, project_file, Path("unused-preview.json"))
     command = [part for part in command if not part.startswith("-WriteOutdatedActions=")]
+    if target_set == "editor":
+        command = [part for part in command if not part.startswith("-Target=")]
+        command.insert(
+            2,
+            f"-Target=LumenworkEditor Mac Development -Project={project_file}",
+        )
+    elif target_set != "combined":
+        raise GuardError(f"unknown execution target set: {target_set}")
     command.append("-NoEngineChanges")
     return command
 
@@ -239,6 +249,7 @@ def guarded_build(
     receipt_file: Path | None = None,
     recovery_token: str | None = None,
     preview_only: bool = False,
+    execute_target_set: str = "combined",
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> int:
     facts = collect_identity(project_root, engine_root)
@@ -262,7 +273,11 @@ def guarded_build(
     print(f"PREVIEW_OK actions={len(actions)} engine_outputs={len(engine_outputs(actions, engine_root))}")
     if preview_only:
         return 0
-    execute = runner(execution_command(engine_root, project_file), check=False, text=True)
+    execute = runner(
+        execution_command(engine_root, project_file, execute_target_set),
+        check=False,
+        text=True,
+    )
     if execute.returncode:
         raise GuardError(f"guarded UBT build failed with exit code {execute.returncode}")
     return 0
@@ -285,6 +300,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="one-use token; prefer the LUMENWORK_MANAGER_RECOVERY_TOKEN environment variable",
     )
     parser.add_argument("--preview-only", action="store_true")
+    parser.add_argument(
+        "--execute-target-set",
+        choices=("combined", "editor"),
+        default="combined",
+        help="targets to execute after the exact combined-target preview passes",
+    )
     return parser.parse_args(argv)
 
 
@@ -302,6 +323,7 @@ def main(argv: list[str] | None = None) -> int:
             receipt_file=args.manager_recovery_receipt,
             recovery_token=args.manager_recovery_token,
             preview_only=args.preview_only,
+            execute_target_set=args.execute_target_set,
         )
     except (GuardError, FileNotFoundError, json.JSONDecodeError) as error:
         print(f"GUARD_REJECTED: {error}", file=sys.stderr)
