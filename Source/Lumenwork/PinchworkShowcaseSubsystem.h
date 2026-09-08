@@ -116,9 +116,9 @@ private:
 	double LastQualityModeChangeTime = -1000.0;
 	// See LastRingCallTime above -- same call-gap release detection for the pinky entry point.
 	double LastPinkyCallTime = -1000.0;
-	// A contiguous run of calls closer together than this is ONE held press. 0.25s is ~22 ticks at
-	// 90Hz -- far longer than any tick gap, far shorter than a real release-and-repinch.
-	static constexpr double PinchReleaseGapSeconds = 0.25;
+	// The release-gap threshold itself lives at file scope in the .cpp (GPinchReleaseGapSeconds) --
+	// it is only used there, and a non-reflected static constexpr inside a UCLASS body is needless
+	// exposure to UnrealHeaderTool parsing.
 
 	// --- One-shot GPU trace (DumpGPU) ---
 	// 2026-09-04: Alex wants a RANKED per-pass GPU cost breakdown instead of more blind cvar A/B.

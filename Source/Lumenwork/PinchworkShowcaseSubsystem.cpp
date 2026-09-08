@@ -53,6 +53,12 @@ static TAutoConsoleVariable<int32> CVarShowcaseDisableScriptedInput(
 	TEXT("confound the measurement with continuous mode cycling. 0 = normal showcase behavior."),
 	ECVF_Default);
 
+// Showcase_OnPinkyPinch/OnRingPinch are called on EVERY TICK the caller's touch-check is true, so a
+// release is only observable as a GAP IN CALLS. A contiguous run of calls closer together than this
+// is ONE held press. 0.25s is ~22 ticks at 90Hz -- far longer than any tick gap, far shorter than a
+// real release-and-repinch.
+static constexpr double GPinchReleaseGapSeconds = 0.25;
+
 TStatId UPinchworkShowcaseSubsystem::GetStatId() const
 {
 	RETURN_QUICK_DECLARE_CYCLE_STAT(UPinchworkShowcaseSubsystem, STATGROUP_Tickables);
@@ -560,7 +566,7 @@ void UPinchworkShowcaseSubsystem::Showcase_OnPinkyPinch()
 	// so a release is observable as a GAP IN CALLS: treat a call after a gap as a new press and
 	// suppress the rest of the contiguous run.
 	const double Now = FPlatformTime::Seconds();
-	const bool bNewPress = (Now - LastPinkyCallTime) > PinchReleaseGapSeconds;
+	const bool bNewPress = (Now - LastPinkyCallTime) > GPinchReleaseGapSeconds;
 	LastPinkyCallTime = Now;
 	if (!bNewPress) { return; }
 	LastQualityModeChangeTime = Now;
@@ -581,7 +587,7 @@ void UPinchworkShowcaseSubsystem::Showcase_OnRingPinch()
 
 	// Call-gap release detection -- see the matching comment in Showcase_OnPinkyPinch() above.
 	const double Now = FPlatformTime::Seconds();
-	const bool bNewPress = (Now - LastRingCallTime) > PinchReleaseGapSeconds;
+	const bool bNewPress = (Now - LastRingCallTime) > GPinchReleaseGapSeconds;
 	LastRingCallTime = Now;
 	if (!bNewPress) { return; }
 	LastAlphaModeChangeTime = Now;
