@@ -20,6 +20,7 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "Kismet/GameplayStatics.h"
+#include "HAL/IConsoleManager.h"
 #include "Animation/AnimInstance.h"
 #include "TimerManager.h"
 #include "UObject/FieldIterator.h"
@@ -74,6 +75,21 @@ static TAutoConsoleVariable<int32> CVarPinchGrab(
     TEXT("1 = index-thumb pinch grabs/releases the nearest GrabComponent actor (hand tracking)"),
     ECVF_Default);
 
+// 2026-09-08: master gate for this whole subsystem. It is a UGameInstanceSubsystem, so it
+// auto-creates for ANY project linking this module and used to unconditionally take over input
+// plumbing: AddMappingContext(IMC_Default, 0) + a synthesised IMC_GamepadLookAim at priority 10,
+// plus a 60Hz core ticker that calls EnableInput/DisableInput, InjectInputForAction, and writes
+// Pawn->SetActorLocation/SetActorRotation and PC->SetControlRotation.
+// A project whose pawn owns its own input/locomotion cannot coexist with that, and the symptom is
+// simply "my input stopped working" with nothing in the log to explain it. Default 0 (opt-in):
+// hijacking the player's pawn is never a safe default. Set to 1 for the VRTemplate gamepad/pistol
+// behaviour this subsystem was written for.
+static TAutoConsoleVariable<int32> CVarPinchworkGamepadInput(
+    TEXT("r.Pinchwork.GamepadInput"), 0,
+    TEXT("1 = enable the Pinchwork gamepad/pistol input subsystem (adds mapping contexts, installs a\n")
+    TEXT("60Hz input ticker, and drives the pawn transform). 0 = leave input entirely to the project."),
+    ECVF_Default);
+
 // Debug logging — writes to UE_LOG only (HUD display disabled).
 static void ScreenMsg(const FString &M) {
   UE_LOG(LogTemp, Warning, TEXT("[GamepadSetup] %s"), *M);
@@ -97,6 +113,40 @@ void UGamepadInputSetup::Initialize(FSubsystemCollectionBase &Collection) {
   bPinchHeldLeft  = false;
 
   ScreenMsg(TEXT("=== SUBSYSTEM INITIALIZED ==="));
+
+  // 2026-09-08: THIS SUBSYSTEM NOW SEIZES INPUT ONLY WHEN ASKED TO.
+  //
+  // It is a UGameInstanceSubsystem, so it auto-creates for every project that links this module --
+  // and it used to unconditionally (a) AddMappingContext(IMC_Default, 0) plus a synthesised
+  // IMC_GamepadLookAim at priority 10, and (b) install a 60Hz core ticker that runs BEFORE the
+  // Enhanced Input subsystem tick and calls EnableInput/DisableInput, InjectInputForAction, and
+  // Pawn->SetActorRotation()/PC->SetControlRotation() directly.
+  //
+  // On a pawn that owns its own input system that is indistinguishable from "input is broken".
+  // Alex, 2026-09-08, on the M5: "My input system in my pawn is different from pinchwork and ever
+  // since I added the pinchwork subsystem into my pawn none of MY inputs have worked. For example
+  // open palm to fly forward or pinch to grab the air and move or double pinch the air to scale."
+  // IMPORTANT, so nobody re-derives a wrong theory from this comment: Alex's gesture system does
+  // NOT go through Enhanced Input at all -- it measures bone proximity on Event Tick and drives the
+  // pawn itself. So mapping-context priority is NOT the mechanism, and the per-frame
+  // SetActorLocation here is gated behind a gamepad deadzone (|LX|,|LY| > 0.15) so it does not fire
+  // with no gamepad connected. What this subsystem definitely DOES do unconditionally is install
+  // itself into a project that never asked for it and take ownership of input plumbing and the pawn
+  // transform. That is enough reason for it to be opt-in, and gating it makes the question testable
+  // with ONE variable: set r.Pinchwork.GamepadInput=1 to put it back and see if the symptom returns.
+  // The exact interference path is NOT yet proven -- do not claim it is.
+  //
+  // Seizing another pawn's input routing must be OPT-IN. Default 0. Projects that actually want the
+  // VRTemplate gamepad/pistol behaviour set r.Pinchwork.GamepadInput=1 (ini or command line).
+  // Same reasoning as bPinchToTravel: a feature that hijacks the player is never a safe default.
+  if (CVarPinchworkGamepadInput.GetValueOnGameThread() == 0) {
+    UE_LOG(LogTemp, Warning,
+        TEXT("[GamepadInputSetup] DISABLED (r.Pinchwork.GamepadInput=0). Not adding any mapping "
+             "context and not installing the input ticker -- the pawn's own input system owns "
+             "input. Set r.Pinchwork.GamepadInput=1 to restore the VRTemplate gamepad/pistol path."));
+    if (GLog) { GLog->Flush(); }
+    return;
+  }
 
   // Keep shared level assets resident across OpenLevel (no texture pop-in on travel).
   PreloadPersistentAssets();
