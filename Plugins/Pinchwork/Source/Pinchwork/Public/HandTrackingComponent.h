@@ -352,8 +352,13 @@ public:
 	// TEST: a pinky-to-thumb pinch toggles between Level A and Level B so you can
 	// exercise OpenLevel world-teardown→load on-device in real time. Either hand
 	// triggers it; a process-wide guard prevents a double-trigger mid-teardown.
+	// 2026-09-08: default flipped to OPT-IN (Alex: "level travel shouldn't be set up here because
+	// there's no level to travel to"). This is a TEST feature that owns an A/B map pair; defaulting
+	// it ON silently ejects any project whose startup map is not one of that pair -- Lumenwork boots
+	// on L_XRTemplateMovableTest, so one pinky pinch would have thrown the wearer into TravelTestMap
+	// with no way back short of relaunching. See also the ownership guard in TravelToOtherLevel().
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Test")
-	bool bPinchToTravel = true;
+	bool bPinchToTravel = false;
 
 	// Level A — the default map.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Tracking|Test")

@@ -78,6 +78,9 @@ private:
 	int32 AlphaMode = 1;
 	bool bPrevRingPinch = false;
 	double LastAlphaModeChangeTime = -1000.0;
+	// Blueprint calls Showcase_OnRingPinch every tick its own touch-check reports true, so a RELEASE
+	// is only observable as a GAP IN CALLS. Time of the last CALL (not the last mode change).
+	double LastRingCallTime = -1000.0;
 
 	// --- Quality-mode cycler (D3 TestFlight A/B: shadow quality / Nanite / AA method) ---
 	// Pinky-pinch on either hand steps through render-quality presets, distinct from the ring-pinch
@@ -111,6 +114,11 @@ private:
 	int32 QualityMode = 0;
 	bool bPrevPinkyPinch = false;
 	double LastQualityModeChangeTime = -1000.0;
+	// See LastRingCallTime above -- same call-gap release detection for the pinky entry point.
+	double LastPinkyCallTime = -1000.0;
+	// A contiguous run of calls closer together than this is ONE held press. 0.25s is ~22 ticks at
+	// 90Hz -- far longer than any tick gap, far shorter than a real release-and-repinch.
+	static constexpr double PinchReleaseGapSeconds = 0.25;
 
 	// --- One-shot GPU trace (DumpGPU) ---
 	// 2026-09-04: Alex wants a RANKED per-pass GPU cost breakdown instead of more blind cvar A/B.

@@ -1764,6 +1764,25 @@ void UHandTrackingComponent::TravelToOtherLevel()
 	{
 		return;
 	}
+	// 2026-09-08: refuse when the CURRENT map is neither LevelA nor LevelB. IsInLevelB() only answers
+	// "am I in B", so a THIRD map answers false and was treated as "I am in A" -- sending the wearer
+	// to LevelB with no way back short of relaunching. Lumenwork boots on L_XRTemplateMovableTest, so
+	// one pinky pinch would have ejected Alex out of the very map this build exists to show. A test
+	// feature must never yank the player out of a map it does not own.
+	{
+		FString MapName = World->GetMapName();
+		MapName.RemoveFromStart(World->StreamingLevelsPrefix);
+		const bool bOwnsThisMap =
+			MapName.Equals(FPackageName::GetShortName(LevelAPath), ESearchCase::IgnoreCase) ||
+			MapName.Equals(FPackageName::GetShortName(LevelBPath), ESearchCase::IgnoreCase);
+		if (!bOwnsThisMap)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("HandTracking: pinky-pinch level travel SUPPRESSED -- current map '%s' is neither LevelA (%s) nor LevelB (%s)"),
+				*MapName, *LevelAPath, *LevelBPath);
+			return;
+		}
+	}
 	GLastLevelTravelSeconds = Now;
 	const FString Target = IsInLevelB() ? LevelAPath : LevelBPath;
 	UE_LOG(LogTemp, Warning, TEXT("HandTracking: pinky-pinch level travel -> %s"), *Target);

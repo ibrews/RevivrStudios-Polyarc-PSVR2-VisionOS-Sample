@@ -550,11 +550,19 @@ void UPinchworkShowcaseSubsystem::Showcase_OnPinkyPinch()
 {
 	if (CVarShowcaseDisableScriptedInput.GetValueOnGameThread() != 0) { return; }
 
-	// Same debounce window as UpdateQualityModeCycler() above -- callers are expected to invoke this
-	// on every tick a Blueprint's own touch-check reports true, not just on the rising edge, so the
-	// debounce here is what turns a held pinch into exactly one mode step.
+	// 2026-09-08: this gated on a 0.5s TIME debounce, which does NOT turn a held pinch into one step.
+	// Callers invoke this on EVERY TICK their touch-check reports true, so a check that stays true
+	// just steps again every 0.5s, forever. With 15 quality modes that is a full wrap every 7.5s --
+	// exactly the "mode 8 re-applies every ~8s" and "raced 1->8 in the first ~4s" signature seen on
+	// Swan and the M5, and it silently overrode every -ExecCmds cvar under test (LastSetBy:
+	// Scalability), invalidating two GPU captures. UpdateQualityModeCycler() below never had this
+	// bug because it uses a rising edge on real hand-tracking state. Blueprint only calls on true,
+	// so a release is observable as a GAP IN CALLS: treat a call after a gap as a new press and
+	// suppress the rest of the contiguous run.
 	const double Now = FPlatformTime::Seconds();
-	if ((Now - LastQualityModeChangeTime) <= 0.5) { return; }
+	const bool bNewPress = (Now - LastPinkyCallTime) > PinchReleaseGapSeconds;
+	LastPinkyCallTime = Now;
+	if (!bNewPress) { return; }
 	LastQualityModeChangeTime = Now;
 	QualityMode = (QualityMode + 1) % GNumQualityModes;
 	ApplyQualityMode(QualityMode);
@@ -571,9 +579,11 @@ void UPinchworkShowcaseSubsystem::Showcase_OnRingPinch()
 {
 	if (CVarShowcaseDisableScriptedInput.GetValueOnGameThread() != 0) { return; }
 
-	// Same debounce window and mode cycling as UpdateAlphaModeCycler() above.
+	// Call-gap release detection -- see the matching comment in Showcase_OnPinkyPinch() above.
 	const double Now = FPlatformTime::Seconds();
-	if ((Now - LastAlphaModeChangeTime) <= 0.5) { return; }
+	const bool bNewPress = (Now - LastRingCallTime) > PinchReleaseGapSeconds;
+	LastRingCallTime = Now;
+	if (!bNewPress) { return; }
 	LastAlphaModeChangeTime = Now;
 	AlphaMode = NextReachableAlphaMode(AlphaMode);
 	ApplyAlphaMode(AlphaMode);
