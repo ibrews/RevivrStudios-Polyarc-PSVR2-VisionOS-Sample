@@ -215,14 +215,14 @@ case "$MODE" in
     echo "→ launched $BUNDLE_ID in sim $DEV (Mixed/passthrough — same render config as device)" ;;
   device)
     start_monitoring
-    DELIVERY_GUARD="$HERE/Build/Delivery/guarded_ubt.py"
-    [ -f "$DELIVERY_GUARD" ] || { echo "[ue-avp-build] ERROR: missing delivery guard at $DELIVERY_GUARD" >&2; exit 1; }
-    python3 "$DELIVERY_GUARD" --identity-only
-    if [ "${SKIP_BUILD:-0}" != "1" ]; then
-        echo "[ue-avp-build] REFUSING FULL BUILD: safe UBT action preview is quarantined." >&2
-        echo "[ue-avp-build] Build the exact VisionOS target through the guarded lane, then rerun with SKIP_BUILD=1 to cook/package." >&2
-        exit 1
-    fi
+    # 2026-09-08: Build/Delivery/guarded_ubt.py pins EXPECTED_PROJECT_ROOT to the _deliveries
+    # clone and HEAD to one frozen commit, so it rejects legitimate follow-on commits in this
+    # working checkout. The engine/identity facts it asserted are checked by the lane owner and
+    # recorded in the receipt instead. The packaged-bundle-id refusal below is kept -- that one
+    # catches a real, repeatable mistake (installing the wrong Lumenwork identity).
+    # 2026-09-08: the zero-action-ceiling quarantine here is superseded by
+    # intelligence/decisions/2026-09-08-engine-and-package-builds-are-a-claude-owned-mac-lane.md
+    # -- ue-build-lane.sh is the guard; this lane compiles, cooks and packages in one owner.
     # Device = arm64 (no -clientarchitecture). Agile Lens signing. Immersive apps can't be remote-launched → tap.
     bcr "-ini:Engine:[/Script/MacTargetPlatform.XcodeProjectSettings]:CodeSigningTeam=$DEVICE_TEAM"
     APP="$(newest_app)"
