@@ -160,7 +160,40 @@ verify_log_or_fail() {
   return 0
 }
 
-bcr() {  # shared BuildCookRun — render config comes from the project's committed ini (the Mixed/Pinchwork config), UNTOUCHED
+bcr() {  # shared BuildCookRun -- render config comes from the project's committed ini, UNTOUCHED
+  # 2026-09-09: TWO-PASS BY DEFAULT. The single-pass `-build -cook -stage -pak -package` ALWAYS dies at
+  # the Xcode 'Touch UBT generated tiles' / ApplePostBuildSync step (ExitCode=6) BEFORE cook ever runs,
+  # so `./ue-avp-build.sh sim|device` could not produce a package at all. Measured 2026-09-09 across
+  # phases 1-3 plus both packaging attempts: 5 for 5, deterministic, not a flake.
+  # That abort is POST-LINK, so the binary it just produced is good. Hence:
+  #   PASS 1  -build only        -> links the arch-correct binary, then dies at finalize (expected)
+  #   ASSERT  vtool              -> device and sim share ONE output path and UBT's staleness check is
+  #                                 platform-blind, so this is what stops a sim binary shipping to a headset
+  #   PASS 2  SKIP_BUILD=1       -> -skipbuild -cook -stage -pak, finalize not re-run, succeeds
+  # Verified end to end 2026-09-09: device .app VISIONOS + 429MB cookeddata; sim .app VISIONOSSIMULATOR.
+  # Set BCR_SINGLE_PASS=1 to get the old behaviour back.
+  if [ "${SKIP_BUILD:-0}" = "1" ] || [ "${BCR_SINGLE_PASS:-0}" = "1" ]; then
+    _bcr_raw "$@"; return $?
+  fi
+  echo "[ue-avp-build] pass 1/2: -build (expect the finalize abort; the link is what matters)"
+  BCR_SINGLE_PASS=1 SKIP_BUILD=0 _bcr_build_only "$@" || true
+  local want=device; case " $* " in *iossimulator*) want=simulator ;; esac
+  local bin="$(dirname "$PROJECT")/Binaries/VisionOS/$TARGET"
+  if [ -x "$HOME/knowledge/scripts/visionos-platform-preflight.sh" ]; then
+    bash "$HOME/knowledge/scripts/visionos-platform-preflight.sh" --expect "$want" --binary "$bin" || {
+      echo "[ue-avp-build] ABORT: linked binary is not a $want build -- refusing to cook/package it." >&2
+      return 8; }
+  fi
+  echo "[ue-avp-build] pass 2/2: -skipbuild -cook -stage -pak"
+  SKIP_BUILD=1 _bcr_raw "$@"
+}
+
+_bcr_build_only() {
+  "$UAT" BuildCookRun -project="$PROJECT" -target="$TARGET" -platform=VisionOS \
+    -clientconfig="$CLIENTCONFIG" -build -nop4 -unattended -nopause -utf8output -WaitForUATMutex "$@"
+}
+
+_bcr_raw() {
   # 2026-09-03: SKIP_BUILD=1 drops -build (which pairs with -package) and adds -skipbuild -unrealexe
   # instead, so a fresh -cook -stage -pak can run against an already-finalized .app without re-hitting
   # the Xcode ApplePostBuildSync finalize flake. Passing -skipbuild ALONGSIDE the hardcoded -build (the
