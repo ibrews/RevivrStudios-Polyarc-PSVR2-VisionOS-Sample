@@ -11,7 +11,10 @@
 		}
 	],
 	"Plugins": [
-		{ "Name": "XrsimAgent", "Enabled": true },
+		{
+			"Name": "XrsimAgent",
+			"Enabled": true
+		},
 		{
 			"Name": "ECABridge",
 			"Enabled": true,
@@ -81,6 +84,18 @@
 			"SupportedTargetPlatforms": [
 				"Android"
 			]
+		},
+		{
+			"Name": "MediaPlate",
+			"Enabled": true
+		},
+		{
+			"Name": "AvfMedia",
+			"Enabled": true
+		},
+		{
+			"Name": "ElectraPlayer",
+			"Enabled": true
 		}
 	],
 	"TargetPlatforms": [
