@@ -189,8 +189,20 @@ bcr() {  # shared BuildCookRun -- render config comes from the project's committ
 }
 
 _bcr_build_only() {
+  # 2026-09-09: pass 1 is EXPECTED to end with UBT "Result: Failed" (the ApplePostBuildSync
+  # 'Touch UBT generated tiles' abort, which happens AFTER the link). If that lands in the shared
+  # self-log, ue-build-log-status.sh sees a FAIL marker next to pass 2's success and correctly
+  # reports CONFLICT -> the whole run is failed despite a good package. So pass 1 gets its OWN log.
+  # Pass 2's result is the verdict; pass 1's job is only to produce an arch-correct binary.
+  local p1log="${PROJECT%/*}/Saved/BuildLogs/ue-avp-build-pass1-$$.log"
+  mkdir -p "$(dirname "$p1log")"
+  echo "[ue-avp-build] pass 1 log (finalize abort here is expected): $p1log"
   "$UAT" BuildCookRun -project="$PROJECT" -target="$TARGET" -platform=VisionOS \
-    -clientconfig="$CLIENTCONFIG" -build -nop4 -unattended -nopause -utf8output -WaitForUATMutex "$@"
+    -clientconfig="$CLIENTCONFIG" -build -nop4 -unattended -nopause -utf8output -WaitForUATMutex "$@" \
+    > "$p1log" 2>&1
+  local rc=$?
+  echo "[ue-avp-build] pass 1 rc=$rc  link=$(grep -aoE 'Link \[[a-z0-9]+\] [A-Za-z]+' "$p1log" | tail -1)"
+  return $rc
 }
 
 _bcr_raw() {
