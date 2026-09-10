@@ -7,3 +7,11 @@ DerivedDataCache/
 .DS_Store
 __pycache__/
 *.pyc
+
+# ECABridge is a per-machine DEVELOPER TOOL (Editor-only MCP bridge), not project content.
+# It was previously a committed symlink to /Users/Shared/GH/ECABridge -- an absolute path that
+# exists on one Mac. That broke macOS (dyld resolves the symlink before @loader_path, so baked
+# rpaths walked into /Users/) and Windows (git checked it out as a 26-byte text stub).
+# See intelligence/decisions/2026-09-10-no-committed-absolute-path-symlinks.md
+# Each machine creates its own link via scripts/setup-ecabridge.sh|.bat
+Plugins/ECABridge
