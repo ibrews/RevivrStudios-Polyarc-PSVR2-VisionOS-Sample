@@ -172,7 +172,17 @@ bcr() {  # shared BuildCookRun -- render config comes from the project's committ
   #   PASS 2  SKIP_BUILD=1       -> -skipbuild -cook -stage -pak, finalize not re-run, succeeds
   # Verified end to end 2026-09-09: device .app VISIONOS + 429MB cookeddata; sim .app VISIONOSSIMULATOR.
   # Set BCR_SINGLE_PASS=1 to get the old behaviour back.
-  if [ "${SKIP_BUILD:-0}" = "1" ] || [ "${BCR_SINGLE_PASS:-0}" = "1" ]; then
+  # 2026-09-10 REVERTED TO SINGLE-PASS BY DEFAULT.
+  # I made two-pass the default on 2026-09-09 after MY OWN engine builds died at the Xcode
+  # 'Touch UBT generated tiles' finalize step, and generalised that to "BuildCookRun can never
+  # package". That was wrong. The evidence against it:
+  #   - this project packaged fine on the single-pass path at 2026-09-09 10:36 (429 MB cooked .app)
+  #   - sibling sessions installed R1 CAP30 / R2 CAP22 / R3 CAP45 / S1 BANDFIX to the M5 the same day
+  # Worse, two-pass routes pass 2 through SKIP_BUILD=1, which DROPS -package -- so it only ever
+  # STAGES. No packaged, signed .app is produced, and nothing can be installed to a device.
+  # Two-pass remains available for the case it was built for (a genuine finalize block):
+  #   BCR_TWO_PASS=1 ./ue-avp-build.sh device
+  if [ "${SKIP_BUILD:-0}" = "1" ] || [ "${BCR_TWO_PASS:-0}" != "1" ]; then
     _bcr_raw "$@"; return $?
   fi
   echo "[ue-avp-build] pass 1/2: -build (expect the finalize abort; the link is what matters)"
