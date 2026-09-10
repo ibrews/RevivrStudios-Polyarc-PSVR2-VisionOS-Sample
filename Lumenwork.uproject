@@ -84,18 +84,6 @@
 			"SupportedTargetPlatforms": [
 				"Android"
 			]
-		},
-		{
-			"Name": "MediaPlate",
-			"Enabled": true
-		},
-		{
-			"Name": "AvfMedia",
-			"Enabled": true
-		},
-		{
-			"Name": "ElectraPlayer",
-			"Enabled": true
 		}
 	],
 	"TargetPlatforms": [
