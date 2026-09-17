@@ -8,7 +8,7 @@ public class LumenworkEditorTarget : TargetRules
 	public LumenworkEditorTarget(TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Editor;
-		DefaultBuildSettings = BuildSettingsVersion.V5;
+		DefaultBuildSettings = BuildSettingsVersion.V7;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_6;
 		bOverrideBuildEnvironment = true;
 		// clang-only flags; MSVC (Win64 editor on a Launcher engine) rejects them as D8021.
