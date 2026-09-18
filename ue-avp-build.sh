@@ -41,7 +41,7 @@ BUNDLE_ID="${BUNDLE_ID:-}"                 # blank = auto-detect from the packag
 SIM_UDID="${SIM_UDID:-}"                  # blank = auto-pick a visionOS sim
 DEVICE_ID="${DEVICE_ID:-}"                # blank = auto-pick a connected AVP (or set explicitly)
 DEVICE_TEAM="${DEVICE_TEAM:-C624J4S2F8}"  # Agile Lens LLC — sign com.agilelens.* / AVP builds with this team
-EXPECTED_DEVICE_BUNDLE_ID="${EXPECTED_DEVICE_BUNDLE_ID:-com.agilelens.lumenwork.MyProject}"
+EXPECTED_DEVICE_BUNDLE_ID="${EXPECTED_DEVICE_BUNDLE_ID:-com.agilelens.lumenworkmain.Lumenwork}"
 INSTALL_DEVICE="${INSTALL_DEVICE:-0}"
 DEVICE_ACTIVITY_CHECKED="${DEVICE_ACTIVITY_CHECKED:-0}"
 # --------------------------------------------------------------------------------
@@ -284,7 +284,7 @@ case "$MODE" in
     ACTUAL_DEVICE_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist" 2>/dev/null || true)"
     if [ "$ACTUAL_DEVICE_BUNDLE_ID" != "$EXPECTED_DEVICE_BUNDLE_ID" ]; then
         echo "[ue-avp-build] REFUSING INSTALL: packaged identity '$ACTUAL_DEVICE_BUNDLE_ID' does not equal expected Lumenwork identity '$EXPECTED_DEVICE_BUNDLE_ID'." >&2
-        echo "[ue-avp-build] Light Pavilion owns com.agilelens.lumenwork.Lumenwork; never install that identity from this project." >&2
+        echo "[ue-avp-build] com.agilelens.lumenwork.Lumenwork is occupied on the M5 (label 'Lumenwork B13 0908') and claimed by the separate Light Pavilion project; never install that identity from here." >&2
         echo "[ue-avp-build] Rebrand and re-sign a copy as $EXPECTED_DEVICE_BUNDLE_ID, verify it, then install the verified copy explicitly." >&2
         exit 1
     fi
