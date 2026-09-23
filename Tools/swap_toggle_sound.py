@@ -18,21 +18,22 @@ IDEMPOTENT: re-running after a successful swap reports "already retargeted" and 
 nothing. Safe to leave in a build pipeline.
 
 --------------------------------------------------------------------------------------
-KNOWN LIMITATION -- READ BEFORE RELYING ON THIS IN A PIPELINE
+HOW IT REACHES THE REFERENCE
 --------------------------------------------------------------------------------------
-Stock UE Python CANNOT edit a Blueprint graph node's pin default. `UEdGraph.nodes` is
-exposed (UPROPERTY), but `UEdGraphPin` is a plain struct rather than a UObject, so its
-`DefaultObject` is not reachable from Python in UE 5.8.
+Stock UE Python cannot edit a Blueprint graph node's PIN DEFAULT: `UEdGraph.nodes` is a
+UPROPERTY and is exposed, but `UEdGraphPin` is a plain struct rather than a UObject, so
+`DefaultObject` is invisible to the scripting layer.
 
-So this script can retarget a sound that lives in:
-  * an SCS AudioComponent template's `sound` property, or
-  * a Blueprint variable default of type SoundBase (on the CDO)
+So this script tries, in order:
+  1. SCS AudioComponent template `sound` property       (plain Python)
+  2. Blueprint variable defaults of type SoundBase      (plain Python)
+  3. Graph node PIN DEFAULTS, via the BlueprintPinTools editor plugin
+     (`unreal.BlueprintPinToolsLibrary.set_pin_default_object`)
 
-and it CANNOT retarget a sound that is a literal pin default on a PlaySound2D /
-SpawnSoundAttached node. If that is where the reference lives, this script exits NON-ZERO
-with the exact node names it found, so a pipeline fails loudly instead of silently shipping
-the old sound. In that case the swap is two clicks in the editor, or needs a small
-EditorUtilityBlueprint / C++ helper.
+Step 3 needs Plugins/BlueprintPinTools compiled into the editor. If the plugin is absent,
+the script says so explicitly and still exits NON-ZERO rather than pretending. If none of
+the three paths finds the reference, it exits NON-ZERO listing candidate nodes, so a
+pipeline fails loudly instead of silently shipping the old sound.
 """
 
 import sys
@@ -149,8 +150,43 @@ def main():
     except Exception as exc:
         warn("graph scan unavailable ({})".format(exc))
 
+    # ---- 3b. Graph pin defaults, via the BlueprintPinTools editor plugin -------------
+    if not changed and not already:
+        lib = getattr(unreal, "BlueprintPinToolsLibrary", None)
+        if lib is None:
+            warn("BlueprintPinTools plugin not available in this editor build.")
+            warn("Build Plugins/BlueprintPinTools, or do the swap in-editor (see below).")
+        else:
+            try:
+                found = lib.find_object_pin_defaults(bp, "Collapse")
+                for line in found:
+                    log("  pin default BEFORE: {}".format(line))
+                if not found:
+                    log("  no pin default references Collapse* in this Blueprint")
+                for line in found:
+                    # "Graph::Node::Pin = /Object/Path"
+                    lhs = line.split(" = ")[0]
+                    parts = lhs.split("::")
+                    if len(parts) < 3:
+                        continue
+                    node_id, pin_name = parts[1], parts[2]
+                    res = lib.set_pin_default_object(bp, node_id, pin_name, new_sound, True)
+                    if res.b_already_set:
+                        log("    {} already retargeted".format(res.matched_pin))
+                        already += 1
+                    elif res.b_succeeded:
+                        log("    {}: '{}' -> '{}'".format(
+                            res.matched_pin, res.previous_value, res.new_value))
+                        changed += 1
+                    else:
+                        found_any_old = True
+                        warn("    FAILED on {}: {}".format(lhs, res.error))
+            except Exception as exc:
+                warn("pin-default path errored: {}".format(exc))
+
     # ---- verdict ---------------------------------------------------------------------
     if changed and not DRY_RUN:
+        # Harmless if the plugin already saved: only_if_is_dirty=False is idempotent.
         unreal.EditorAssetLibrary.save_asset(BP_PATH, only_if_is_dirty=False)
         log("SAVED {} ({} reference(s) retargeted)".format(BP_PATH, changed))
         return 0
@@ -163,8 +199,8 @@ def main():
 
     # Nothing reachable was changed. Do NOT report success.
     warn("FAILED: found no reachable {} reference on {}".format(OLD_SOUNDS, BP_PATH))
-    warn("The sound is most likely a PIN DEFAULT on a graph node, which stock UE Python")
-    warn("cannot edit (UEdGraphPin is a struct, not a UObject).")
+    warn("All three paths failed: SCS component, variable default, and graph pin default.")
+    warn("If BlueprintPinTools was missing, build it and re-run before doing this by hand.")
     if sound_nodes:
         warn("Candidate nodes to fix by hand ({}):".format(len(sound_nodes)))
         for n in sound_nodes[:25]:

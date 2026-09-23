@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Blueprint Pin Tools",
+	"Description": "Editor-only helpers for reading and writing Blueprint graph node PIN DEFAULTS from Python. Stock UE Python cannot reach them: UEdGraph.Nodes is a UPROPERTY, but UEdGraphPin is a plain struct rather than a UObject, so its DefaultObject is invisible to the scripting layer. This plugin closes that gap.",
+	"Category": "Editor",
+	"CreatedBy": "Alex Coulombe Presents",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "BlueprintPinTools",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
