@@ -1,0 +1,491 @@
+; Editor side of the local-Swarm (Lightmass) message transport. On a multi-interface Mac
+; (Tailscale/VPN) under macOS local-network privacy, UdpMessaging multicast is not delivered
+; between the editor and UnrealLightmass, so static lighting bakes time out (60s) and fail.
+; Reach Lightmass over a fixed loopback UNICAST channel instead: bind a fixed port and point
+; a StaticEndpoint at Lightmass's fixed port. Lightmass uses the mirror config in
+; Engine/Programs/UnrealLightmass/Config/DefaultEngine.ini (Unicast 0.0.0.0:6678, Static
+; 127.0.0.1:6677). Keep the 0.0.0.0 bind — forcing loopback makes the multicast beacon error.
+[/Script/UdpMessaging.UdpMessagingSettings]
+EnableTransport=True
+UnicastEndpoint=0.0.0.0:6677
++StaticEndpoints=127.0.0.1:6678
+
+[/Script/EngineSettings.GameMapsSettings]
+GlobalDefaultGameMode=/Game/XRFramework/Blueprints/BP_XRGameMode.BP_XRGameMode_C
+EditorStartupMap=/Game/XRFramework/Levels/L_XRTemplateMovableTest.L_XRTemplateMovableTest
+GameDefaultMap=/Game/XRFramework/Levels/L_XRTemplateMovableTest.L_XRTemplateMovableTest
+
+[/Script/Engine.RendererSettings]
+
+; SM5-LUMEN 2026-09-02 (fleet manager): was True, which made the COOK compile SM5 shaders FORWARD
+; while VisionOSEngine.ini told the RUNTIME to go deferred -> permutation mismatch -> launch crash.
+; Safe to flip project-wide: IsForwardShadingEnabled() (RenderUtils.cpp:1689-1694) requires
+; GetMaxSupportedFeatureLevel(Platform) >= ERHIFeatureLevel::SM5, so this cvar is INERT on the
+; ES3_1 mobile path every other build (B9/B10/OfficeShowcase/vr58lab) uses. Deferred is a hard
+; requirement for Lumen.
+r.ForwardShading=False
+
+; @AGILELENS 2026-09-02 — shadow quality under Lumen.
+; Under Lumen the scene's BAKED/stationary lights behave dynamically, so an all-baked-lighting scene
+; suddenly needs real-time shadows it was never authored for -> blocky CSM.
+; Virtual Shadow Maps are NOT an option here: DoesPlatformSupportVirtualShadowMaps() returns
+; bIsProjectEnable && DoesPlatformSupportNanite(), and Nanite is unsupported on METAL_SM5_IOS.
+; Forcing r.Shadow.Virtual.Enable=1 would request shaders that were never cooked — the exact crash
+; class already hit with Lumen's distance-field shaders. So: improve CSM instead.
+; @AGILELENS 2026-09-02: shadow-quality bump REMOVED (was ShadowQuality=5, 4096 maps, 4 cascades,
+; DistanceScale 1.5). It is a large shadow-atlas ask on a mobile GPU and coincided with the app
+; ceasing to advance past frame 0. Reverting to engine/scalability defaults.
+; NOTE for whoever revisits blocky shadows: the stereo ensure
+;   'DependentView == nullptr || DependentView == &View' in UseShadowStencilCulling
+; is PRE-EXISTING and BENIGN -- it fires once per run in builds that render thousands of frames
+; happily. Do not chase it as the cause of a hang; it was in every log back to the first
+; working Lumen build.
+r.MobileHDR=False
+vr.MobileMultiView=True
+vr.InstancedStereo=True
+r.DefaultFeature.AutoExposure=False
+r.DefaultFeature.AmbientOcclusion=False
+r.DefaultFeature.AmbientOcclusionStaticFraction=False
+r.DefaultFeature.MotionBlur=False
+r.Mobile.UseHWsRGBEncoding=True
+
+r.Shadow.Virtual.Enable=0
+
+r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=True
+r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=True
+r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=True
+
+r.DefaultFeature.LocalExposure.HighlightContrastScale=0.8
+r.DefaultFeature.LocalExposure.HighlightContrastScale=0.8
+r.DefaultFeature.LocalExposure.HighlightContrastScale=0.8
+
+r.DefaultFeature.LocalExposure.ShadowContrastScale=0.8
+r.DefaultFeature.LocalExposure.ShadowContrastScale=0.8
+r.DefaultFeature.LocalExposure.ShadowContrastScale=0.8
+
+; @AGILELENS 2026-09-02 (SM5+Lumen device crash fix): the iOS platform baseline
+; (Engine/Config/IOS/BaseIOSEngine.ini:12) sets r.DistanceFields=0, which VisionOS inherits — so
+; FLumenSceneDirectLightingTraceDistanceFieldShadowsCS is NEVER COOKED (0 occurrences in either cook
+; log). But r.DistanceFieldShadowing defaults to 1, so Lumen's direct-lighting path still takes the
+; distance-field branch at runtime and calls GetShader<...TraceDistanceFieldShadowsCS>() on a shader
+; that does not exist -> hard crash 76ms after "Engine is initialized", inside
+; RenderDirectLightingForLumenScene -> TraceDistanceFieldShadows.
+; This is the SAME defect class as the r.ForwardShading cook/runtime mismatch fixed earlier tonight:
+; a setting the COOK sees differs from what the RUNTIME asks for. Aligning the runtime to the cook.
+; DURABLE FIX (engine-level, not done here): Lumen's DF-shadow consumer should gate on
+; DoesPlatformSupportDistanceFields()/r.DistanceFields the same way its ShouldCompilePermutation does.
+; 2026-09-02 REVISED: r.DistanceFieldShadowing=0 was NOT sufficient. Guarding the DF-shadow shader
+; only moved the crash to FRadianceCacheTraceFromProbesCS (Lumen radiance-cache SOFTWARE ray
+; tracing), which also needs distance fields. Lumen's final gather requires EITHER hardware ray
+; tracing OR distance fields, and METAL_SM5_IOS has neither -- so guarding shaders one at a time is
+; whack-a-mole. Enabling distance fields for this platform is the structural fix: it makes the
+; shaders actually cook, satisfying every consumer instead of suppressing them one by one.
+; The iOS baseline (Engine/Config/IOS/BaseIOSEngine.ini:12) sets r.DistanceFields=0 and VisionOS
+; inherits it; this overrides that for this project.
+r.DistanceFields=1
+; 2026-09-08: DF SHADOWING OFF -- this is the blobby/globular shadow fix, validated in-headset.
+; Alex, on a test build differing ONLY by this flag: "definitely has better looking shadows", and
+; later on a build WITHOUT it: "the shadows still have the stuttery globular look I remember from our
+; forward rendering tests in vr58". Two observations, one variable, both directions -- that is as
+; clean as an on-device A/B gets.
+; WHY it is the cause: a -csvGpuStats capture shows GPU/ShadowDepths at 0.093 ms on 1409/3600 frames
+; (CSM effectively idle) while GlobalDistanceFieldUpdate runs on 3247/3600 with a 7.99 MB resident
+; DF atlas. The directional shadows were being traced against a coarse voxel approximation; "blobby"
+; is what that technique looks like, and no cascade setting can sharpen it.
+; r.DistanceFields STAYS 1 -- Lumen needs the distance fields for tracing. Only the SHADOWING use is
+; disabled here.
+; PAIRED with r.Shadow.DistanceScale below: with DF shadowing off, directional shadows come from CSM
+; only and would otherwise stop at the default cascade range. Do not set one without the other.
+r.DistanceFieldShadowing=0
+; Push the CSM range out so crisp cascade shadows cover the visible scene now that DF is not filling
+; in the distance. 4 was the value in the validated test build.
+; @AGILELENS 2026-09-08 REVISED (in-headset verdict, Alex, on Lumenwork M MAXQUAL):
+; "MAXQUALITY definitely looks the best -- sharper and less stuttery and less globular. and it
+;  doesn't seem that much slower." ... "Definitely is 'here's how movable shadows look the best'"
+;
+; DistanceScale=4 was WRONG and was making the globular shadows WORSE. Two errors were stacked in
+; the 2026-09-08 morning config: the lever (distance-field shadowing) and the direction (spreading
+; the cascades over MORE distance at the SAME resolution). Shadow-map texel density is
+; resolution^2 / covered world area -- raising distance without raising resolution DILUTES it, and
+; coarse texels under a MOVING directional light are exactly what "globular and stuttery" is.
+;
+; Note for anyone reading the old value: r.Shadow.DistanceScale is CLAMPED to [0,2] in
+; DirectionalLightComponent.cpp:702-712 (`FMath::Clamp(CVar->GetValueOnRenderThread(), 0.0f, 2.0f)`),
+; so "4" was only ever acting as 2. The net change here is therefore 2x tighter cascades and 4x the
+; shadow-map area = ~8x texel density, not the 16x a naive reading of the numbers suggests.
+;
+; Cost is negligible and measured: GPU/ShadowProjection 1.61 ms, GPU/ShadowDepths 0.16 ms -- under
+; 5% of a 38 ms frame. Shadow quality was never the framerate lever on this scene.
+;
+; r.ShadowQuality>1 is the branch that selects the FILTERED projection permutation
+; (ShadowRendering.cpp:1553 `if (LocalQuality > 1)`); SHADOW_QUALITY maps 1->ManualNoFiltering,
+; 3->Manual3x3PCF (16 taps), 5->Manual5x5PCF (36 taps) in ShadowFilteringCommon.ush:353. That is
+; why low quality reads as stable-but-pixelated: it has no spatial filter at all.
+;
+; Full derivation: intelligence/techniques/visionos-movable-directional-shadows-texel-density.md
+r.Shadow.DistanceScale=1
+r.ShadowQuality=5
+; The shadow-map resolution caps otherwise come from scalability (BaseScalability.ini -> 2048).
+r.Shadow.MaxCSMResolution=4096
+r.Shadow.MaxResolution=4096
+; @AGILELENS 2026-09-08 -- Q4 ALLTIGHT. These three cost NOTHING and collapse the frame-time TAIL,
+; which is what "stutter" actually is. Measured on the M5, 2077 frames, all cvars verified applied
+; in the device log:
+;                     mean    median   p95     p99    frames>45ms
+;   MAXQUAL alone    38.18    33.57   44.80   50.97      ~5%
+;   + these three    29.71    33.23   33.71   38.80      0.0%
+; The median barely moves -- the typical frame was never the problem. p95 falls onto the median,
+; i.e. the slow frames stop happening. 64.8% of frames land in the 30-35 ms band.
+;
+; r.Shadow.CSMDepthBias multiplies TransitionSize directly (ShadowRendering.cpp:2091), and
+; TransitionSize is the SOFT DEPTH RAMP width -- softness is not only the PCF kernel. Default 10 was
+; giving a wide, per-frame-varying ramp (ShadowBounds/MaxSubjectZ are re-fit every frame), which is
+; what smeared under a moving light.
+; FadeResolution/MinResolution were far below stock (8/4 vs 64/32). Low floors let the chosen shadow
+; resolution -- and therefore world-units-per-texel, and therefore penumbra width -- step around as
+; things move. This is the half that also explains the forward-renderer movable-spotlight repro.
+; CSM.TransitionScale=0 removes the cascade cross-fade blend.
+r.Shadow.CSMDepthBias=1
+r.Shadow.FadeResolution=64
+r.Shadow.MinResolution=32
+r.Shadow.CSM.TransitionScale=0
+
+r.GenerateMeshDistanceFields=True
+
+r.DynamicGlobalIlluminationMethod=1
+
+r.ReflectionMethod=1
+
+; @AGILELENS 2026-09-02 — LUMEN LITE (UE 5.8's medium-quality GI).
+; r.Lumen.FinalGatherMethod, per the cvar's OWN help text in Lumen.cpp:
+;   0 = Irradiance Field Gather  -- "Faster but lower quality GI. Targeted at mid range PC and Switch 2"
+;   1 = Screen Probe Gather      -- "Higher quality GI"  (engine DEFAULT, what we were running)
+; NOTE the cvar numbering is INVERTED relative to the internal ELumenFinalGatherMethod enum
+; (ScreenProbeGather=0, IrradianceFieldGather=1). UseIrradianceFieldGather() correctly tests the
+; CVAR == 0. Do not "fix" that comparison -- it looks wrong and is right.
+; WHY: measured on the M5, GPU/LumenScreenProbeGather was 14.8ms = ~55% of the entire GPU frame,
+; while GPU/LumenIrradianceFieldGather ran on 0 frames. Epic bills Lite as roughly 2x faster.
+; BISECT 2026-09-02 (my call, not a reviewed decision): with this at 0 (Lumen Lite) the app died
+; ~1s after 'Engine is initialized'. The cook log contained ZERO IrradianceField shader compiles --
+; the same 'uncooked shader' signature as the Lumen distance-field crash fixed earlier today.
+; Reverting to 1 (Screen Probe Gather, the engine default) to isolate the variable, since that is
+; the value the long-running 900-frame captures used.
+; To retry Lumen Lite: set 0 AND first verify irradiance-field shaders actually cook for
+; METAL_SM5_IOS -- an empty grep in the cook log is the warning sign, not a clean bill of health.
+;
+; ============================================================================================
+; 2026-09-08: LUMEN LITE IS NOW ON. The 09-02 blocker above is RESOLVED and the check it asked
+; for has been performed, on device, by the wearer.
+;
+;   MEASURED on Alex's M5, same scene/headset/hour, AutoCycle telemetry, mode 0 vs mode 0:
+;     Screen Probe Gather (=1)   18.91 fps / 52.9 ms
+;     Irradiance Field   (=0)    30.70 fps / 32.6 ms      -> +62.3%, -20.3 ms
+;     Lumen GI OFF (control)     55.84 fps / 17.9 ms
+;   Every one of the 15 quality modes improved 55-75%. This also finally beats the 2026-09-06
+;   accepted baseline of 49.01 ms / 20.5 fps.
+;
+; THE CHECK THE NOTE ABOVE DEMANDED, done properly rather than inferred from the fps number:
+;   -csvGpuStats capture says  GPU/LumenIrradianceFieldGather  mean 14.915 ms, ACTIVE ON
+;   3597/3600 FRAMES. On 09-02 that same pass ran on ZERO frames and the app died ~1s in.
+;   It agrees to within 0.2 ms with the independently-derived Lite-vs-NoLumen delta (14.7 ms),
+;   so the GI is genuinely running -- not silently absent with a cheap frame as the giveaway.
+; Corroborating: with =0 every r.Lumen.ScreenProbeGather.* knob goes INERT (mode 9, "2x FINER
+;   probes", costs -49% at =1 but is flat at =0). The knobs going dead is independent evidence
+;   the gather method really changed.
+;
+; TRADEOFF, explicitly accepted by Alex 2026-09-08: Irradiance Field Gather is lower-quality GI
+; (Epic targets it at "mid range PC and Switch 2"). 18.9 -> 30.7 fps was judged worth it.
+; To revert: set this back to 1. Nothing else in this file depends on it.
+; ============================================================================================
+r.Lumen.FinalGatherMethod=0
+r.Mobile.AntiAliasing=3
+; 2026-09-04: TRYING FXAA (was 3=MSAA) per Alex's request -- TSR-class temporal AA is expensive and
+; still looked jagged, wants a cheap framerate win tried first. NOTE the enum was previously
+; mislabeled in project notes as "3=TSR" -- verified against Engine/Source/Runtime/Engine/Public/
+; SceneUtils.h on ue582-xr-main-m5: 0=None, 1=FXAA, 2=TemporalAA, 3=MSAA, 4=TSR, 5=SMAA. On this
+; SM5 deferred (Lumen) path, GetDefaultAntiAliasingMethod() force-disables MSAA to None whenever
+; SM5+!ForwardShading (SceneUtils.cpp) -- so the true prior behavior was AA effectively off at that
+; layer, with Lumen's own temporal upscaler (TSR) still applying on top regardless of this cvar's
+; value (device log showed active r.TSR.* state even at MSAA=3). FXAA is a pure post-process pass
+; with no temporal dependency, so it should be unaffected by that override. If this looks
+; unacceptably soft/aliased, try 2 (TemporalAA) next -- see the checkpoint doc for context.
+; This is a shader-permutation-affecting change -- needs a real cook, not just this ini edit.
+; 2026-09-04 UPDATE: on-device verdict from Alex after the FXAA build -- fps unchanged, still
+; jagged. Root cause confirmed two ways: (1) fresh device log showed r.FXAA.Quality=0 ("Console",
+; the weakest of 6 tiers per PostProcessAA.cpp's cvar comment; engine default is 4) -- a
+; near-free, weak blur explains both symptoms; (2) the run's own CSV profiler capture
+; (-csvGpuStats, 1105 frames) showed FrameTime avg 49.8ms/GPUTime avg 49.1ms vs GameThreadTime
+; 3.7ms -- this build is GPU-bound (almost certainly Lumen GI cost, not AA), so no AA method
+; choice was ever going to move the framerate. Moving to TAA per the pre-agreed fallback for the
+; visual-quality half of the ask (real temporal accumulation vs a weak Console FXAA blur) --
+; framerate itself needs a separate Lumen-cost investigation, not an AA swap.
+; 2026-09-04 REVERT: TAA build was BROKEN on-device -- Alex reported right eye rendering as pure
+; passthrough (nothing drawn), left eye fine. Confirmed via fresh device log this was NOT a
+; regression of the HMDRenderTarget stereo fix (xr.SecondaryScreenPercentage.HMDRenderTarget still
+; correctly applying 100->100) -- a NEW, TAA-specific issue. Working theory, not yet root-caused:
+; this platform has RHISupportsMobileMultiView=0 AND RHISupportsInstancedStereo=0 (confirmed in
+; device log), so each eye renders as a fully separate pass, not instanced/multiview. TAA (unlike
+; FXAA) keeps PER-VIEW temporal history state across frames -- if that history isn't correctly
+; allocated/indexed for the second (right) eye's separate pass on this non-multiview stereo path,
+; the right eye could get no valid history and render nothing. Reverting to FXAA (1), the last
+; confirmed-both-eyes-working state, rather than leave a broken build installed. If TAA is wanted
+; again, this needs actual root-causing (check the per-view temporal history allocation/indexing
+; in the TAA history buffer setup against StereoViewIndex on this fork) before retrying, not just
+; re-flipping the cvar.
+r.AntiAliasingMethod=1
+; TRUE = baked/static lighting enabled. UnrealLightmass was ported to native arm64 in the engine
+; fork (Apple Silicon): LMMath.h now routes its SSE2 intrinsics through Embree's sse2neon shim and
+; LMStats.h reads CNTVCT_EL0 instead of x86 __rdtsc, so a native arm64 UnrealLightmass builds and
+; loads Embree's arm64 (NEON) slice — no more Rosetta/Embree crash. The maps have Stationary lights
+; + bForceNoPrecomputedLighting=false, so bakes produce real GI/shadows. (Flipping this True forces a
+; one-time VisionOS shader recompile.) See engine: Programs/UnrealLightmass LMMath.h/LMStats.h/Build.cs.
+r.AllowStaticLighting=True
+
+r.SkinCache.CompileShaders=True
+
+r.RayTracing=False
+r.VirtualTextures=True
+
+[/Script/AndroidRuntimeSettings.AndroidRuntimeSettings]
+; Android-only class (read from the HOST ini hierarchy, so it cannot live in Config/Android/).
+; Vulkan SM5 only — Epic's maintained Lumen path on Android; no ES3.1 fallback so a wrong
+; runtime choice cannot silently look like "Lumen didn't work". Renderer overrides for this path
+; are in Config/Android/AndroidEngine.ini.
+bSupportsVulkan=False
+bSupportsVulkanSM5=True
+bPackageDataInsideApk=True
+PackageName=com.agilelens.lumenwork.lumen
+ApplicationDisplayName=Lumenwork Lumen SM5
+bBuildForES31=False
+; Per intelligence/runbooks/one-apk-quest-pico-androidxr-hand-tracking.md: the three vendors' immersive
+; gates are additive. Meta (VR category + hand-tracking tags) + Khronos IMMERSIVE_HMD (PICO, Android XR)
+; + pvr.app.type=vr (PICO) + android.permission.HAND_TRACKING (Android XR). Android XR additionally
+; needs the AndroidXR vendor plugin (start mode property + its OpenXR loader).
+ExtraApplicationSettings=<meta-data android:name="pvr.app.type" android:value="vr" /><meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3|quest3s" />
+bPackageForMetaQuest=True
+bPackageForOpenXRImmersive=True
++ExtraPermissions=android.permission.HAND_TRACKING
+
+[/Script/WindowsTargetPlatform.WindowsTargetSettings]
+DefaultGraphicsRHI=DefaultGraphicsRHI_DX12
+DefaultGraphicsRHI=DefaultGraphicsRHI_Default
+-D3D12TargetedShaderFormats=PCD3D_SM5
++D3D12TargetedShaderFormats=PCD3D_SM6
+-D3D11TargetedShaderFormats=PCD3D_SM5
++D3D11TargetedShaderFormats=PCD3D_SM5
+Compiler=Default
+AudioSampleRate=48000
+AudioCallbackBufferFrameSize=1024
+AudioNumBuffersToEnqueue=1
+AudioMaxChannels=0
+AudioNumSourceWorkers=4
+SpatializationPlugin=
+SourceDataOverridePlugin=
+ReverbPlugin=
+OcclusionPlugin=
+CompressionOverrides=(bOverrideCompressionTimes=False,DurationThreshold=5.000000,MaxNumRandomBranches=0,SoundCueQualityIndex=0)
+CacheSizeKB=65536
+MaxChunkSizeOverrideKB=0
+bResampleForDevice=False
+MaxSampleRate=48000.000000
+HighSampleRate=32000.000000
+MedSampleRate=24000.000000
+LowSampleRate=12000.000000
+MinSampleRate=8000.000000
+CompressionQualityModifier=1.000000
+AutoStreamingThreshold=0.000000
+SoundCueCookQualityIndex=-1
+
+[/Script/NavigationSystem.NavigationSystemV1]
+bAllowClientSideNavigation=True
+
+[/Script/LinuxTargetPlatform.LinuxTargetSettings]
+-TargetedRHIs=SF_VULKAN_SM5
++TargetedRHIs=SF_VULKAN_SM6
+
+[/Script/MacTargetPlatform.MacTargetSettings]
++TargetedRHIs=SF_METAL_SM5
+
+
+[/Script/Engine.Engine]
++ActiveGameNameRedirects=(OldGameName="TP_VirtualRealityBP",NewGameName="/Script/Lumenwork")
++ActiveGameNameRedirects=(OldGameName="/Script/TP_VirtualRealityBP",NewGameName="/Script/Lumenwork")
++ActiveGameNameRedirects=(OldGameName="/Script/My_Project",NewGameName="/Script/Lumenwork")
+
+[/Script/AndroidFileServerEditor.AndroidFileServerRuntimeSettings]
+bEnablePlugin=True
+bAllowNetworkConnection=True
+SecurityToken=
+bIncludeInShipping=False
+bAllowExternalStartInShipping=False
+bCompileAFSProject=False
+bUseCompression=False
+bLogFiles=False
+bReportStats=False
+ConnectionType=USBOnly
+bUseManualIPAddress=False
+ManualIPAddress=
+
+[/Script/IOSRuntimeSettings.IOSRuntimeSettings]
+; visionOS SIMULATOR support — required AT RUNTIME (the sim's A8-level METAL_SIM): without bSupportAppleA8 the
+; FMetalDynamicRHI ctor aborts at RHIInit (MetalRHI.cpp:289). Must be COMMITTED, not passed via -ini: (which only
+; reaches the cook, not the runtime config). Harmless on device. See KB ue-visionos-sim-device-build-flow.
+bEnableSimulatorSupport=True
+; SM5-LUMEN 2026-09-02 (fleet manager): must be HERE, in DefaultEngine.ini — NOT only in
+; Config/VisionOS/VisionOSEngine.ini or Config/iOS/IOSEngine.ini.
+; FIOSTargetPlatformSettings::SupportsMetalMobileSM5() reads
+; GConfig->GetBool("/Script/IOSRuntimeSettings.IOSRuntimeSettings", ..., GEngineIni)
+; from inside the COOK COMMANDLET, which is a Mac *editor* process — so GEngineIni there is the
+; editor's merged Engine.ini, never the target platform's. bEnableSimulatorSupport directly above
+; is the working control: it is read by the SAME function ten lines away
+; (IOSTargetPlatformSettings.cpp:199 vs :212) and METAL_SIM cooks correctly because it lives here.
+bSupportsMetalMobileSM5=True
+bSupportAppleA8=True
+MetalLanguageVersion=9
+MinimumiOSVersion=IOS_17
+IOSTeamID=C624J4S2F8
+bAutomaticSigning=True
+bAllowControllers=true
+bGameSupportsMultipleActiveControllers=true
+bControllersBlockDeviceFeedback=false
+AdditionalPlistData=<key>NSHandsTrackingUsageDescription</key><string>Track your hands to interact with the application.</string><key>NSAccessoryTrackingUsageDescription</key><string>Track spatial controllers for 6DOF input.</string><key>NSWorldSensingUsageDescription</key><string>Track your head position for 6DOF immersive experience.</string><key>UIApplicationSceneManifest</key><dict><key>UIApplicationPreferredDefaultSceneSessionRole</key><string>CPSceneSessionRoleImmersiveSpaceApplication</string><key>UIApplicationSupportsMultipleScenes</key><true/><key>UISceneConfigurations</key><dict><key>CPSceneSessionRoleImmersiveSpaceApplication</key><array><dict><key>UISceneInitialImmersionStyle</key><string>UIImmersionStyleMixed</string></dict></array></dict></dict><key>GCSupportsControllerUserInteraction</key><true/><key>GCSupportedGameControllers</key><array><dict><key>ProfileName</key><string>ExtendedGamepad</string></dict><dict><key>ProfileName</key><string>SpatialGamepad</string></dict></array>
+; @AGILELENS 2026-08-30: distinguished from pinchwork-vanilla's identical "Pinchwork" display name
+; -- both showed as the same icon label on-device, distinguishable only by version number (flagged
+; by night-manager peer session). Bundle ID (com.acp.MyProject) was already distinct from vanilla's
+; com.acp.vanilla.MyProject; this is the separate key for the home-screen label itself.
+BundleDisplayName=Lumenwork B13 0908
+BundleName=Lumenwork
+
+[/Script/MacTargetPlatform.XcodeProjectSettings]
+bUseModernXcode=True
+bUseAutomaticCodeSigning=True
+; Modern Xcode builds compute PRODUCT_BUNDLE_IDENTIFIER as $(UE_SIGNING_PREFIX).$(UE_PRODUCT_NAME_STRIPPED)
+; (see XcodeProject.cs) — IOSRuntimeSettings.BundleIdentifier is NOT consulted on this codepath.
+; UE_PRODUCT_NAME_STRIPPED is hard-derived from the .uproject filename (Lumenwork -> Lumenwork),
+; not independently configurable, so the achievable bundle ID here is com.acp.MyProject, not a
+; fully custom string — getting the literal "com.acp.pinchwork" would require renaming the project.
+; @AGILELENS 2026-09-02 (NoLumen control): the display name was changed to "Pinchwork SM5 NoLumen"
+; in Build/IOS/UBTGenerated/Info.Template.plist, but THIS line was left at pinchworkoqb10 — which
+; would have produced com.agilelens.pinchworkoqb10.MyProject and OVERWRITTEN THE B10 CONTROL on the
+; M5. Display name and bundle identity are set in two different places on this codepath; changing
+; one is not changing the other. Always verify the packaged .app's CFBundleIdentifier before install.
+CodeSigningPrefix=com.agilelens.lumenwork
+CodeSigningTeam=C624J4S2F8
+
+[/Script/PythonScriptPlugin.PythonScriptPluginSettings]
+bRemoteExecution=False
+
+; Avoid UE 5.6 Zen DDC recovery crashes on macOS in this Polyarc branch.
+; Keep the cache local and filesystem-backed instead of using ZenLocal HTTP.
+[DerivedDataBackendGraph]
+Root=(Type=KeyLength, Length=120, Inner=AsyncPut)
+AsyncPut=(Type=AsyncPut, Inner=Hierarchy)
+Hierarchy=(Type=Hierarchical, Inner=Pak, Inner=EnginePak, Inner=Local)
+Local=(Type=FileSystem, UnusedFileAge=8, Path="%ENGINEVERSIONAGNOSTICUSERDIR%DerivedDataCache", EnvPathOverride=UE-LocalDataCachePath, EditorOverrideSetting=LocalDerivedDataCache)
+Pak=(Type=ReadPak, Filename="%GAMEDIR%DerivedDataCache/DDC.ddp")
+EnginePak=(Type=ReadPak, Filename="%ENGINEDIR%DerivedDataCache/DDC.ddp")
+
+[InstalledDerivedDataBackendGraph]
+Root=(Type=KeyLength, Length=120, Inner=AsyncPut)
+AsyncPut=(Type=AsyncPut, Inner=Hierarchy)
+Hierarchy=(Type=Hierarchical, Inner=Pak, Inner=CompressedPak, Inner=EnginePak, Inner=EnterprisePak, Inner=Local)
+Local=(Type=FileSystem, UnusedFileAge=8, Path="%ENGINEVERSIONAGNOSTICUSERDIR%DerivedDataCache", EnvPathOverride=UE-LocalDataCachePath, EditorOverrideSetting=LocalDerivedDataCache)
+Pak=(Type=ReadPak, Filename="%GAMEDIR%DerivedDataCache/DDC.ddp")
+CompressedPak=(Type=ReadPak, Filename="%GAMEDIR%DerivedDataCache/Compressed.ddp", Compressed=true)
+EnginePak=(Type=ReadPak, Filename=../../../Engine/DerivedDataCache/Compressed.ddp, Compressed=true)
+EnterprisePak=(Type=ReadPak, Filename=../../../Enterprise/DerivedDataCache/Compressed.ddp, Compressed=true)
+
+; --- Pinchwork plugin extraction ---
+; The hand-tracking classes moved from the My_Project module into the Pinchwork
+; plugin module (own repo, sold standalone). These redirects repoint existing
+; asset references — VRPawn.uasset's components and any Blueprint enum pins —
+; from /Script/My_Project.* to /Script/Pinchwork.* so nothing breaks on load.
+;
+; --- My_Project -> Lumenwork module rename (2026-09-04) ---
+; The project's own primary module was renamed from My_Project to Lumenwork (Source dir,
+; Target.cs/Build.cs, .uproject Modules entry, LUMENWORK_API export macro). Every UCLASS/UENUM
+; still living in that module needs the same /Script/<OldModule>.<Class> -> /Script/<NewModule>.<Class>
+; redirect as the Pinchwork extraction above, or every Blueprint/asset referencing them (VRPawn,
+; PistolPinch, etc.) fails to resolve on load.
+[CoreRedirects]
++ClassRedirects=(OldName="/Script/My_Project.HandTrackingComponent",NewName="/Script/Pinchwork.HandTrackingComponent")
++ClassRedirects=(OldName="/Script/My_Project.HandSkeletalDriverComponent",NewName="/Script/Pinchwork.HandSkeletalDriverComponent")
++EnumRedirects=(OldName="/Script/My_Project.EHandTrackingSide",NewName="/Script/Pinchwork.EHandTrackingSide")
++EnumRedirects=(OldName="/Script/My_Project.EHandGesture",NewName="/Script/Pinchwork.EHandGesture")
++EnumRedirects=(OldName="/Script/My_Project.EHandCalibrationState",NewName="/Script/Pinchwork.EHandCalibrationState")
++EnumRedirects=(OldName="/Script/My_Project.EBoneRotationStrategy",NewName="/Script/Pinchwork.EBoneRotationStrategy")
++EnumRedirects=(OldName="/Script/My_Project.EWristAdjustTest",NewName="/Script/Pinchwork.EWristAdjustTest")
++EnumRedirects=(OldName="/Script/My_Project.EThumbStrategyTest",NewName="/Script/Pinchwork.EThumbStrategyTest")
++ClassRedirects=(OldName="/Script/My_Project.DummyClass",NewName="/Script/Lumenwork.DummyClass")
++ClassRedirects=(OldName="/Script/My_Project.UGamepadInputSetup",NewName="/Script/Lumenwork.UGamepadInputSetup")
++ClassRedirects=(OldName="/Script/My_Project.UHMDStatusSubsystem",NewName="/Script/Lumenwork.UHMDStatusSubsystem")
++ClassRedirects=(OldName="/Script/My_Project.UPinchworkShowcaseSubsystem",NewName="/Script/Lumenwork.UPinchworkShowcaseSubsystem")
++ClassRedirects=(OldName="/Script/My_Project.UVisionProCapabilityReport",NewName="/Script/Lumenwork.UVisionProCapabilityReport")
++ClassRedirects=(OldName="/Script/My_Project.UVisionProGPUDetection",NewName="/Script/Lumenwork.UVisionProGPUDetection")
++EnumRedirects=(OldName="/Script/My_Project.EVisionProGPUTier",NewName="/Script/Lumenwork.EVisionProGPUTier")
+
+[ConsoleVariables]
+; @AGILELENS 2026-08-30: EXPERIMENTAL, testing a hypothesis from an offline .gputrace analysis
+; (scripts/gputrace/gputrace.py) of this exact build (com.acp.MyProject on Alex's M5). Reported
+; symptom: "wonky and zoomed" stereo -- one eye reads at a dramatically different scale/framing
+; than the other. Dumped SceneColor (the app's own render target, pre-copy) and it is CORRECTLY
+; matched between the two eye slices -- normal small stereo parallax only. Dumped Color_SwapChain0/1
+; (the actual OpenXR-submitted output) and the same two eyes show the scale/zoom mismatch. So the
+; corruption is introduced AFTER the app's own rendering, in the encoder trace's
+; warpPreProcess/VFWMeshGeneration/StreamReduceDepthBin-L/R chain -- Apple's own visionOS system
+; compositor (wakeboardd) foveated-warp/reprojection pass, which builds its per-eye warp mesh from
+; the depth the app submits via the OpenXR depth extension. This project never had
+; xr.OpenXRAllowDepthLayer set at all (unlike the sibling pinchwork-avp/PinchworkTemplate project,
+; which already disables it for an unrelated crash -- see that project's DefaultEngine.ini). Testing
+; whether disabling depth submission here also eliminates the per-eye warp corruption, on the theory
+; that malformed/inconsistent per-eye depth is confusing the system compositor's reprojection, not
+; UE's own renderer. UNVERIFIED until re-traced on device -- if the zoom mismatch persists with this
+; set to False, the depth-submission theory is wrong and this should be reverted.
+; VERDICT 2026-08-31: I reverted this experiment, per its own instruction above. My call, on evidence.
+; It was never evaluated for the zoom/warp theory because it caused a HARD CRASH first.
+; Symbolicated terminal stack from the on-device crash report (Pinchwork Fork 0.0.4):
+;   FDebug::CheckVerifyFailedImpl2 -> FOXRVisionOSSession::XrEndFrame -> FOpenXRHMD::OnFinishRendering
+;   -> FOpenXRRenderBridge::Present -> FMetalRHICommandContext::EndDrawingViewport
+; XrEndFrame (OXRVisionOSSession.cpp:1231) has an unconditional `check(Depth0 && Depth1)` that does
+; NOT consult this cvar. Disabling depth leaves the swapchain unbound -- the app log shows
+; "[MSAAHUNT] Depth.Resolve = TRANSIENT texture -- XR depth swapchain NOT bound" twice immediately
+; before the critical error -- and then that check asserts it IS bound. Disabling depth here does not
+; avoid a crash, it causes one.
+; Corroborating device observation: pinchwork-vanilla carried the identical line; another session
+; removed it, and that build now launches and behaves correctly in the headset. This restores the
+; same known-good state on the fork side.
+; The zoom/warp depth-submission theory is therefore still UNTESTED, not disproven -- if it is
+; retried, it needs a path that does not trip XrEndFrame's assert.
+;xr.OpenXRAllowDepthLayer=False
+
+; DEPTH-EDGE FIX 2026-09-03: Alex's M5 verdict on the 574fcca build was "gone from very noticeable
+; to barely noticeable" -- gross reprojection blockiness fixed, but a residual thin/jagged
+; low-opacity fringe remains along high-depth object silhouettes (confirmed via zoomed frame crop
+; of Alex's screen recording + device log cross-reference; see
+; departments/engineering/lumenwork-depth-edge-log.md for full derivation). Root-cause hypothesis:
+; the default threshold (0.003) is a near-zero binary alpha test, and TSR's per-frame sub-pixel
+; jitter at the AA silhouette transition flips pixels across that threshold frame-to-frame, so the
+; fixup pass's covered/not-covered decision is unstable exactly at the edge. Raising the threshold
+; well above the jitter noise floor should make the decision stick to "not covered" through the AA
+; transition zone, eliminating the flicker/step. UNVERIFIED ON DEVICE -- next step is Alex wearing
+; the M5 again with this build and reporting whether the residual fringe is gone. If it made things
+; worse or did nothing, revert and look at ArraySize<2 (the other open hypothesis in the log).
+r.Mobile.VisionOS.TranslucentDepthAlphaThreshold=0.15
+
+[/Script/OpenXRHMD.OpenXRHMDSettings]
+
+; ALPHA FIX 2026-08-31 (attempt 3 — correct SECTION, verified against the working app's runtime log).
+; Symptom: on device only the AUTHORED-translucent statue renders; every OPAQUE material is invisible.
+; 36 opaque draws are SUBMITTED in PassType=0 with zero missing shader permutations, so the geometry
+; draws and is then composited away — alpha=0 on opaque output, i.e. no alpha inversion happened.
+; Runtime cvar diff, read from both apps' own device logs:
+;   vr58lab   (renders correctly): xr.OpenXRInvertAlpha:1  and NO r.AlphaInvertPass at all
+;   Pinchwork (opaque invisible) : OpenXRInvertAlpha never set, r.AlphaInvertPass:0
+; Attempts 1 and 2 failed on PLACEMENT, not on the value:
+;   attempt 1 -> Config/VisionOS/VisionOSEngine.ini : reached the staged config, never applied
+;   attempt 2 -> DefaultEngine.ini [RendererSettings] : still never applied
+; vr58lab declares it under [/Script/OpenXRHMD.OpenXRHMDSettings]. An xr.* cvar is owned by the OpenXR
+; HMD settings object, so RendererSettings silently ignores it. Matching the reference exactly —
+; file AND section.
+xr.OpenXRInvertAlpha=True
+
