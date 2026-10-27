@@ -15,7 +15,7 @@ This is a technical sample, not a turnkey binary release. You will need a compat
 - Apple Developer account/team configured in Xcode for device deployment.
 - Git LFS installed before cloning.
 
-## Start Here
+## Quickstart
 
 If you are using an AI assistant to reproduce this project, give it this repository and tell it to read these files first:
 
@@ -58,6 +58,14 @@ The generated project keeps PSVR2 Sense controller support through `SpatialAcces
 
 If Unreal shows a missing module dialog for `OpenXREyeTracker`, make sure `My_Project.uproject` has `OpenXREyeTracker` disabled. This sample intentionally disables it for this workflow.
 
+## Things to Try
+
+1. **Run `Tools/validate-template-clean.sh` from the repository root** — it should confirm the master template has no generated Unreal, Xcode, or packaged-app output.
+2. **Create a disposable renamed copy with `Tools/create-project-from-template.sh "/absolute/path/MyVisionSample" MyVisionSample com.example.MyVisionSample`** — the script should create `MyVisionSample.uproject`, rename the C++ module, preserve `SpatialAccessoryTracking`, and initialize a fresh Git repository.
+3. **Open the generated `.uproject` and inspect its plugin list** — `SpatialAccessoryTracking` and `OpenXRVisionOS` should be enabled while `OpenXREyeTracker` remains disabled.
+4. **Package the project for VisionOS with a compatible Polyarc Unreal Engine 5.6 build, then open the generated Xcode project** — Xcode should expose the app target for your own team, bundle identifier, and Apple Vision Pro run destination.
+5. **Launch on Apple Vision Pro with paired PSVR2 Sense controllers** — the app should enter immersive mode and report controller tracking and input instead of returning to the home view.
+
 ## Cook And Package
 
 In Unreal Editor:
@@ -98,3 +106,5 @@ For questions about this public sample, contact support@revivrstudios.com.
 ## Disclaimer
 
 This project is an unofficial community sample. It is not affiliated with, endorsed by, or associated with Apple Inc., Sony Interactive Entertainment, Epic Games, or Polyarc. PlayStation and PSVR2 are trademarks of Sony Interactive Entertainment. Apple Vision Pro is a trademark of Apple Inc.
+
+Presented by **Alex Coulombe Presents**.
